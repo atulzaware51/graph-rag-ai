@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f5f7fb">
+    <title>GraphSheet AI</title>
+    <link rel="stylesheet" href="/app/styles.css">
+    <script src="/app/app.js" defer></script>
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="/app/" aria-label="GraphSheet AI home">
+        <span class="brand-mark" aria-hidden="true">G</span>
+        <span>GraphSheet <span class="brand-light">AI</span></span>
+      </a>
+      <a class="api-link" href="/docs">API docs</a>
+    </header>
+
+    <main class="page">
+      <section class="intro">
+        <p class="eyebrow">SPREADSHEET INTELLIGENCE</p>
+        <h1>Make your data<br><span>easier to understand.</span></h1>
+        <p class="intro-copy">Upload a spreadsheet to explore its structure, ask evidence-backed questions, and inspect possible connections between datasets.</p>
+      </section>
+
+      <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+
+      <section class="panel upload-panel" aria-labelledby="upload-title">
+        <div>
+          <p class="eyebrow">GET STARTED</p>
+          <h2 id="upload-title">Add a spreadsheet</h2>
+          <p class="muted">CSV or XLSX, up to 10 MB. Your file is stored locally by this application.</p>
+        </div>
+        <form id="upload-form" class="upload-form">
+          <label class="file-picker" for="file-input">
+            <span aria-hidden="true">+</span>
+            <span id="file-name">Choose a CSV or XLSX file</span>
+          </label>
+          <input id="file-input" name="file" type="file" accept=".csv,.xlsx" required>
+          <button class="button button-primary" type="submit">Upload spreadsheet</button>
+        </form>
+      </section>
+
+      <section class="section-heading">
+        <div>
+          <p class="eyebrow">WORKSPACE</p>
+          <h2>Your datasets</h2>
+        </div>
+        <div class="dataset-controls">
+          <label class="visually-hidden" for="dataset-select">Select a dataset</label>
+          <select id="dataset-select">
+            <option value="">No datasets yet</option>
+          </select>
+          <button id="refresh-datasets" class="button button-secondary" type="button">Refresh</button>
+        </div>
+      </section>
+
+      <div class="content-grid">
+        <section class="panel" aria-labelledby="preview-title">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">DATA</p>
+              <h2 id="preview-title">Dataset preview</h2>
+            </div>
+            <span id="dataset-summary" class="count-badge">Select a dataset</span>
+          </div>
+          <div id="preview-table" class="table-wrap empty-state">Choose a dataset to see its first rows.</div>
+        </section>
+
+        <section class="panel" aria-labelledby="schema-title">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">STRUCTURE</p>
+              <h2 id="schema-title">Schema profile</h2>
+            </div>
+          </div>
+          <div id="schema-content" class="empty-state">Column statistics and sample values will appear here.</div>
+        </section>
+      </div>
+
+      <div class="content-grid question-grid">
+        <section class="panel" aria-labelledby="rag-title">
+          <p class="eyebrow">GROUNDED ANSWERS</p>
+          <h2 id="rag-title">Ask your data</h2>
+          <p class="muted">Answers use retrieved spreadsheet evidence and include source references.</p>
+          <form id="rag-form" class="question-form">
+            <label for="rag-question">Question</label>
+            <textarea id="rag-question" rows="3" maxlength="2000" placeholder="What stands out in these records?" required></textarea>
+            <button class="button button-primary" type="submit">Get an answer</button>
+          </form>
+          <div id="rag-result" class="result-box empty-state">Your answer and evidence references will appear here.</div>
+        </section>
+
+        <section class="panel" aria-labelledby="sql-title">
+          <p class="eyebrow">READ-ONLY ANALYSIS</p>
+          <h2 id="sql-title">Ask with SQL</h2>
+          <p class="muted">Natural-language questions are translated into a dataset-scoped read-only query.</p>
+          <form id="sql-form" class="question-form">
+            <label for="sql-question">Question</label>
+            <textarea id="sql-question" rows="3" maxlength="2000" placeholder="How many rows are in each category?" required></textarea>
+            <button class="button button-primary" type="submit">Run analysis</button>
+          </form>
+          <div id="sql-result" class="result-box empty-state">Query results will appear here.</div>
+          <div id="sql-chart" class="chart" aria-label="Chart of query results"></div>
+        </section>
+      </div>
+
+      <section class="panel graph-panel" aria-labelledby="graph-title">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">SCHEMA CONNECTIONS</p>
+            <h2 id="graph-title">Knowledge graph</h2>
+            <p class="muted">Column-level structure and heuristic relationship candidates; matches are not automatically approved.</p>
+          </div>
+          <button id="load-graph" class="button button-secondary" type="button">Explore graph</button>
+        </div>
+        <div id="graph-content" class="empty-state">Load the graph to inspect dataset and column nodes.</div>
+      </section>
+
+      <footer class="footer">GraphSheet AI | Spreadsheet data stays in the configured local SQLite database. Gemini-powered features send selected questions and, depending on the workflow, retrieved evidence or the dataset schema to the configured provider.</footer>
+    </main>
+  </body>
+</html>

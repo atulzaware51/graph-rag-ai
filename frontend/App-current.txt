@@ -1,0 +1,750 @@
+﻿
+import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  getDatasets,
+  checkHealth,
+  uploadDataset,
+} from './services/api'
+import './App.css'
+
+const navigation = [
+  {
+    section: 'WORKSPACE',
+    items: [
+      { id: 'overview', icon: 'â—«', label: 'Overview' },
+      { id: 'datasets', icon: 'â–¤', label: 'Datasets' },
+      { id: 'analyst', icon: 'âœ³', label: 'AI Analyst' },
+      { id: 'sql', icon: 'âŒ˜', label: 'SQL Studio' },
+      { id: 'knowledge', icon: 'â—Ž', label: 'Knowledge Graph' },
+    ],
+  },
+  {
+    section: 'PREFERENCES',
+    items: [{ id: 'settings', icon: 'âš™', label: 'Settings' }],
+  },
+]
+
+const features = [
+  {
+    icon: 'â–¤',
+    title: 'Explore datasets',
+    text: 'Upload spreadsheets and inspect their structure.',
+    target: 'datasets',
+  },
+  {
+    icon: 'âœ³',
+    title: 'Ask your data',
+    text: 'Get AI-assisted answers grounded in your data.',
+    target: 'analyst',
+  },
+  {
+    icon: 'âŒ˜',
+    title: 'Generate SQL',
+    text: 'Turn natural-language questions into SQL queries.',
+    target: 'sql',
+  },
+  {
+    icon: 'â—Ž',
+    title: 'Explore relationships',
+    text: 'Discover connections in your knowledge graph.',
+    target: 'knowledge',
+  },
+]
+
+const MAX_FILE_SIZE = 10 * 1024 * 1024
+const ACCEPTED_EXTENSIONS = ['.csv', '.xlsx']
+
+function formatNumber(value) {
+  return (Number(value) || 0).toLocaleString()
+}
+
+function getFileExtension(filename) {
+  return filename.slice(filename.lastIndexOf('.')).toLowerCase()
+}
+
+function App() {
+  const [activePage, setActivePage] = useState('overview')
+  const [question, setQuestion] = useState('')
+  const [datasets, setDatasets] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
+  const [apiStatus, setApiStatus] = useState('checking')
+  const [error, setError] = useState('')
+
+  const [selectedFile, setSelectedFile] = useState(null)
+  const [uploading, setUploading] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState(0)
+  const [uploadError, setUploadError] = useState('')
+  const [uploadSuccess, setUploadSuccess] = useState('')
+  const fileInputRef = useRef(null)
+
+  const loadDatasets = useCallback(async (showLoading = true) => {
+    if (showLoading) {
+      setLoading(true)
+    } else {
+      setRefreshing(true)
+    }
+
+    setError('')
+
+    try {
+      const datasetList = await getDatasets()
+      setDatasets(datasetList)
+      setApiStatus('connected')
+      return true
+    } catch (err) {
+      setApiStatus('disconnected')
+      setError(err.message || 'Unable to load datasets.')
+      return false
+    } finally {
+      setLoading(false)
+      setRefreshing(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function initializeDashboard() {
+      try {
+        const health = await checkHealth()
+
+        if (cancelled) return
+
+        setApiStatus(
+          health.status === 'healthy' ? 'connected' : 'disconnected',
+        )
+      } catch {
+        if (!cancelled) setApiStatus('disconnected')
+      }
+
+      if (!cancelled) {
+        await loadDatasets(true)
+      }
+    }
+
+    initializeDashboard()
+
+    return () => {
+      cancelled = true
+    }
+  }, [loadDatasets])
+
+  const pageNames = {
+    overview: 'Overview',
+    datasets: 'Datasets',
+    analyst: 'AI Analyst',
+    sql: 'SQL Studio',
+    knowledge: 'Knowledge Graph',
+    settings: 'Settings',
+  }
+
+  const totalRows = datasets.reduce(
+    (total, dataset) => total + (Number(dataset.row_count) || 0),
+    0,
+  )
+
+  const totalColumns = datasets.reduce(
+    (total, dataset) => total + (Number(dataset.column_count) || 0),
+    0,
+  )
+
+  function openPage(page) {
+    setActivePage(page)
+  }
+
+  function handleFileChange(event) {
+    const file = event.target.files?.[0]
+
+    setSelectedFile(null)
+    setUploadError('')
+    setUploadSuccess('')
+    setUploadProgress(0)
+
+    if (!file) return
+
+    const extension = getFileExtension(file.name)
+
+    if (!ACCEPTED_EXTENSIONS.includes(extension)) {
+      setUploadError('Choose a CSV or XLSX spreadsheet.')
+      event.target.value = ''
+      return
+    }
+
+    if (file.size > MAX_FILE_SIZE) {
+      setUploadError('The file exceeds the 10 MB upload limit.')
+      event.target.value = ''
+      return
+    }
+
+    if (file.size === 0) {
+      setUploadError('The selected file is empty.')
+      event.target.value = ''
+      return
+    }
+
+    setSelectedFile(file)
+  }
+
+  async function handleUpload(event) {
+    event.preventDefault()
+
+    if (!selectedFile || uploading) return
+
+    setUploading(true)
+    setUploadProgress(0)
+    setUploadError('')
+    setUploadSuccess('')
+
+    try {
+      const response = await uploadDataset(selectedFile, (progress) => {
+        setUploadProgress(progress)
+      })
+
+      setUploadSuccess(
+        response.message || `${selectedFile.name} uploaded successfully.`,
+      )
+      setSelectedFile(null)
+
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ''
+      }
+
+      await loadDatasets(false)
+    } catch (err) {
+      setUploadError(err.message || 'Upload failed. Please try again.')
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  function submitQuestion(event) {
+    event.preventDefault()
+
+    if (!question.trim()) return
+
+    setActivePage('analyst')
+  }
+
+  function renderDatasetTable() {
+    if (loading) {
+      return <p className="dataset-message">Loading datasetsâ€¦</p>
+    }
+
+    if (error && datasets.length === 0) {
+      return (
+        <div className="dataset-message" role="alert">
+          <p>{error}</p>
+          <button
+            className="primary-button"
+            onClick={() => loadDatasets(true)}
+          >
+            Retry loading datasets
+          </button>
+        </div>
+      )
+    }
+
+    if (datasets.length === 0) {
+      return (
+        <div className="dataset-empty">
+          <span className="placeholder-icon">â–¤</span>
+          <h3>No datasets yet</h3>
+          <p>Upload a CSV or XLSX spreadsheet to get started.</p>
+          <button
+            className="primary-button"
+            onClick={() => fileInputRef.current?.click()}
+          >
+            Choose spreadsheet
+          </button>
+        </div>
+      )
+    }
+
+    return (
+      <div className="dataset-table-wrap">
+        <table className="dataset-table">
+          <thead>
+            <tr>
+              <th>Dataset</th>
+              <th>Rows</th>
+              <th>Columns</th>
+              <th>Table name</th>
+            </tr>
+          </thead>
+          <tbody>
+            {datasets.map((dataset, index) => (
+              <tr
+                key={
+                  dataset.dataset_id ||
+                  `${dataset.original_filename}-${index}`
+                }
+              >
+                <td>
+                  <div className="dataset-name-cell">
+                    <span className="dataset-file-icon">â–¤</span>
+                    <span>
+                      <strong>
+                        {dataset.original_filename || 'Untitled dataset'}
+                      </strong>
+                      <small>
+                        {dataset.created_at
+                          ? new Date(dataset.created_at).toLocaleString()
+                          : 'Stored dataset'}
+                      </small>
+                    </span>
+                  </div>
+                </td>
+                <td>{formatNumber(dataset.row_count)}</td>
+                <td>{formatNumber(dataset.column_count)}</td>
+                <td>
+                  <code>{dataset.table_name || 'â€”'}</code>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )
+  }
+
+  return (
+    <div className="app-shell">
+      <aside className="sidebar">
+        <button
+          className="brand"
+          onClick={() => openPage('overview')}
+          aria-label="GraphSheet AI overview"
+        >
+          <span className="brand-mark">G</span>
+          <span className="brand-copy">
+            <strong>GraphSheet AI</strong>
+            <small>DATA INTELLIGENCE</small>
+          </span>
+        </button>
+
+        <div className="workspace-switcher">
+          <span className="workspace-avatar">G</span>
+          <span className="workspace-copy">
+            <strong>My workspace</strong>
+            <small>Personal workspace</small>
+          </span>
+          <span className="switcher-arrow">âŒ„</span>
+        </div>
+
+        <nav className="sidebar-nav" aria-label="Main navigation">
+          {navigation.map((group) => (
+            <div className="nav-group" key={group.section}>
+              <p className="nav-heading">{group.section}</p>
+
+              {group.items.map((item) => (
+                <button
+                  key={item.id}
+                  className={`nav-item ${
+                    activePage === item.id ? 'active' : ''
+                  }`}
+                  onClick={() => openPage(item.id)}
+                  aria-current={activePage === item.id ? 'page' : undefined}
+                >
+                  <span className="nav-icon">{item.icon}</span>
+                  <span>{item.label}</span>
+                </button>
+              ))}
+            </div>
+          ))}
+        </nav>
+
+        <div className="sidebar-bottom">
+          <div className="connection-status">
+            <span
+              className={`status-dot ${
+                apiStatus === 'connected' ? '' : 'status-offline'
+              }`}
+            />
+            <span>
+              <strong>
+                {apiStatus === 'connected'
+                  ? 'API connected'
+                  : apiStatus === 'checking'
+                    ? 'Checking APIâ€¦'
+                    : 'API unavailable'}
+              </strong>
+              <small>
+                {apiStatus === 'connected'
+                  ? 'FastAPI is responding'
+                  : apiStatus === 'checking'
+                    ? 'Connecting to backend'
+                    : 'Check backend and try again'}
+              </small>
+            </span>
+          </div>
+
+          <div className="profile">
+            <div className="profile-avatar">A</div>
+            <span className="profile-copy">
+              <strong>Workspace user</strong>
+              <small>Local development</small>
+            </span>
+            <span className="profile-menu">â€¢â€¢â€¢</span>
+          </div>
+        </div>
+      </aside>
+
+      <main className="main-panel">
+        <header className="topbar">
+          <div className="breadcrumbs">
+            <span>Workspace</span>
+            <span className="breadcrumb-divider">/</span>
+            <strong>{pageNames[activePage]}</strong>
+          </div>
+
+          <div className="topbar-actions">
+            <span className="environment-label">
+              <span
+                className={`status-dot ${
+                  apiStatus === 'connected' ? '' : 'status-offline'
+                }`}
+              />
+              {apiStatus === 'connected'
+                ? 'Connected'
+                : apiStatus === 'checking'
+                  ? 'Connecting'
+                  : 'Offline'}
+            </span>
+
+            <button
+              className="help-button"
+              title="Help"
+              aria-label="Help"
+              onClick={() => openPage('settings')}
+            >
+              ?
+            </button>
+          </div>
+        </header>
+
+        <div className="page-content">
+          {activePage === 'overview' && (
+            <>
+              <section className="welcome-section">
+                <div>
+                  <p className="eyebrow">YOUR DATA WORKSPACE</p>
+                  <h1>
+                    Make your data <span>make sense.</span>
+                  </h1>
+                  <p className="welcome-description">
+                    Explore spreadsheets, ask questions in plain English,
+                    generate SQL, and uncover relationships across your data.
+                  </p>
+                  <button
+                    className="primary-button"
+                    onClick={() => openPage('datasets')}
+                  >
+                    Manage datasets <span>â†’</span>
+                  </button>
+                </div>
+
+                <div className="welcome-symbol" aria-hidden="true">
+                  <div className="symbol-line line-one" />
+                  <div className="symbol-line line-two" />
+                  <div className="symbol-line line-three" />
+                  <span className="symbol-node node-one" />
+                  <span className="symbol-node node-two" />
+                  <span className="symbol-node node-three" />
+                  <span className="symbol-node node-four" />
+                  <span className="symbol-core">G</span>
+                </div>
+              </section>
+
+              {error && (
+                <div className="api-error" role="alert">
+                  <strong>Unable to load live dashboard data.</strong>
+                  <p>{error}</p>
+                  <button
+                    className="primary-button"
+                    onClick={() => loadDatasets(true)}
+                  >
+                    Retry connection
+                  </button>
+                </div>
+              )}
+
+
+
+              <section className="section-block question-section">
+                <div className="section-heading">
+                  <div>
+                    <h2>Ask your data</h2>
+                    <p>Start with a question you want to investigate.</p>
+                  </div>
+                  <span className="ai-label">
+                    <span>âœ³</span> AI ASSISTANT
+                  </span>
+                </div>
+
+                <form className="question-form" onSubmit={submitQuestion}>
+                  <span className="question-icon">âœ³</span>
+                  <input
+                    aria-label="Question for your data"
+                    value={question}
+                    onChange={(event) => setQuestion(event.target.value)}
+                    placeholder="e.g. What is the average value in my dataset?"
+                  />
+                  <button type="submit" disabled={!question.trim()}>
+                    Ask question <span>â†’</span>
+                  </button>
+                </form>
+
+                <p className="form-hint">
+                  {datasets.length > 0
+                    ? `${datasets.length} datasets available. AI question submission is the next integration step.`
+                    : 'Connect a dataset from the Datasets section first.'}
+                </p>
+              </section>
+                {/* -=-=-=-= */}
+
+
+              <section className="metrics-grid" aria-label="Workspace summary">
+                <article className="metric-card">
+                  <div className="metric-top">
+                    <span className="metric-icon blue">â–¤</span>
+                    <span className="metric-label">DATASETS</span>
+                  </div>
+                  <strong className="metric-value">
+                    {loading ? 'â€¦' : error ? 'â€”' : datasets.length}
+                  </strong>
+                  <p>Stored datasets</p>
+                </article>
+
+                <article className="metric-card">
+                  <div className="metric-top">
+                    <span className="metric-icon purple">âœ³</span>
+                    <span className="metric-label">AI QUESTIONS</span>
+                  </div>
+                  <strong className="metric-value">â€”</strong>
+                  <p>Usage tracking not connected</p>
+                </article>
+
+                <article className="metric-card">
+                  <div className="metric-top">
+                    <span className="metric-icon green">âŒ˜</span>
+                    <span className="metric-label">TOTAL ROWS</span>
+                  </div>
+                  <strong className="metric-value">
+                    {loading ? 'â€¦' : error ? 'â€”' : formatNumber(totalRows)}
+                  </strong>
+                  <p>Across stored datasets</p>
+                </article>
+
+                <article className="metric-card">
+                  <div className="metric-top">
+                    <span className="metric-icon amber">â—Ž</span>
+                    <span className="metric-label">TOTAL COLUMNS</span>
+                  </div>
+                  <strong className="metric-value">
+                    {loading ? 'â€¦' : error ? 'â€”' : formatNumber(totalColumns)}
+                  </strong>
+                  <p>Across stored datasets</p>
+                </article>
+              </section>
+
+
+
+                {/* ---=-= */}
+              <section className="section-block">
+                <div className="section-heading">
+                  <div>
+                    <h2>Get started</h2>
+                    <p>Choose a tool to begin exploring your data.</p>
+                  </div>
+                  <span className="section-caption">4 TOOLS</span>
+                </div>
+
+                <div className="feature-grid">
+                  {features.map((feature) => (
+                    <button
+                      className="feature-card"
+                      key={feature.target}
+                      onClick={() => openPage(feature.target)}
+                    >
+                      <span className="feature-icon">{feature.icon}</span>
+                      <span className="feature-title">{feature.title}</span>
+                      <span className="feature-description">
+                        {feature.text}
+                      </span>
+                      <span className="feature-link">
+                        Open tool <span>â†—</span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+
+
+
+
+                      {/* ------=-=--== */}
+            </>
+          )}
+
+          {activePage === 'datasets' && (
+            <>
+              <section className="page-intro">
+                <p className="eyebrow">DATA MANAGEMENT</p>
+                <h1>Your datasets</h1>
+                <p>
+                  Upload spreadsheets and review the datasets stored in your
+                  GraphSheet AI workspace.
+                </p>
+              </section>
+
+              <section className="section-block upload-panel">
+                <div className="section-heading">
+                  <div>
+                    <h2>Upload a spreadsheet</h2>
+                    <p>Supported formats: CSV and XLSX. Maximum size: 10 MB.</p>
+                  </div>
+                </div>
+
+                <form className="upload-form" onSubmit={handleUpload}>
+                  <label className="file-picker-label" htmlFor="dataset-file">
+                    <span className="upload-icon">â†‘</span>
+                    <strong>
+                      {selectedFile ? selectedFile.name : 'Choose a file'}
+                    </strong>
+                    <span>
+                      {selectedFile
+                        ? `${(selectedFile.size / 1024).toFixed(1)} KB`
+                        : 'Select a CSV or XLSX spreadsheet from your computer.'}
+                    </span>
+                  </label>
+
+                  <input
+                    ref={fileInputRef}
+                    id="dataset-file"
+                    type="file"
+                    accept=".csv,.xlsx"
+                    onChange={handleFileChange}
+                    disabled={uploading}
+                  />
+
+                  <div className="upload-actions">
+                    <button
+                      className="secondary-button"
+                      type="button"
+                      disabled={uploading}
+                      onClick={() => fileInputRef.current?.click()}
+                    >
+                      Browse files
+                    </button>
+                    <button
+                      className="primary-button"
+                      type="submit"
+                      disabled={!selectedFile || uploading}
+                    >
+                      {uploading
+                        ? 'Uploadingâ€¦'
+                        : 'Upload spreadsheet'}
+                    </button>
+                  </div>
+
+                  {uploading && (
+                    <div className="upload-progress">
+                      <div className="upload-progress-heading">
+                        <span>Uploading spreadsheet</span>
+                        <strong>{uploadProgress}%</strong>
+                      </div>
+                      <progress
+                        value={uploadProgress}
+                        max="100"
+                        aria-label="Upload progress"
+                      />
+                    </div>
+                  )}
+
+                  {uploadError && (
+                    <div className="upload-feedback error" role="alert">
+                      <strong>Upload failed</strong>
+                      <p>{uploadError}</p>
+                    </div>
+                  )}
+
+                  {uploadSuccess && (
+                    <div className="upload-feedback success" role="status">
+                      <strong>Upload completed</strong>
+                      <p>{uploadSuccess}</p>
+                    </div>
+                  )}
+                </form>
+              </section>
+
+              <section className="section-block">
+                <div className="section-heading">
+                  <div>
+                    <h2>Stored datasets</h2>
+                    <p>
+                      {loading
+                        ? 'Loading stored datasetsâ€¦'
+                        : `${datasets.length} dataset${datasets.length === 1 ? '' : 's'} found`}
+                    </p>
+                  </div>
+                  <button
+                    className="secondary-button"
+                    onClick={() => loadDatasets(false)}
+                    disabled={loading || refreshing}
+                  >
+                    {refreshing ? 'Refreshingâ€¦' : 'â†» Refresh'}
+                  </button>
+                </div>
+
+                {renderDatasetTable()}
+              </section>
+            </>
+          )}
+
+          {activePage !== 'overview' && activePage !== 'datasets' && (
+            <section className="placeholder-page">
+              <span className="placeholder-icon">
+                {navigation.flatMap((group) => group.items)
+                  .find((item) => item.id === activePage)?.icon || 'âš™'}
+              </span>
+
+              <p className="eyebrow">GRAPHSHEET AI WORKSPACE</p>
+              <h1>{pageNames[activePage]}</h1>
+              <p className="placeholder-description">
+                This workspace is being built. The next steps will connect this
+                screen to your existing FastAPI backend.
+              </p>
+
+              {activePage === 'analyst' && question.trim() && (
+                <div className="question-preview">
+                  <span>Your question</span>
+                  <p>{question}</p>
+                </div>
+              )}
+
+              <button
+                className="primary-button"
+                onClick={() => openPage('overview')}
+              >
+                â† Back to overview
+              </button>
+            </section>
+          )}
+
+          <footer className="page-footer">
+            <span>
+              GraphSheet AI <span className="footer-dot">Â·</span> Data
+              intelligence workspace
+            </span>
+            <span>Local development</span>
+          </footer>
+        </div>
+      </main>
+    </div>
+  )
+}
+
+export default App
+

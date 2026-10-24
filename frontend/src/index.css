@@ -1,0 +1,78 @@
+
+/* GraphSheet AI — Global styles and design tokens */
+
+:root {
+  font-family: Inter, "Segoe UI", Arial, sans-serif;
+  color: #202938;
+  background: #f6f7f9;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+
+  --color-primary: #3869bd;
+  --color-text: #202938;
+  --color-muted: #7d899a;
+  --color-border: #e3e7ed;
+  --color-surface: #ffffff;
+  --color-background: #f6f7f9;
+  --color-sidebar: #202833;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-width: 320px;
+  min-height: 100%;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+}
+
+body,
+button,
+input,
+textarea,
+select {
+  font-family: Inter, "Segoe UI", Arial, sans-serif;
+}
+
+button,
+input,
+textarea,
+select {
+  font-size: inherit;
+}
+
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 2px solid #6b94d6;
+  outline-offset: 3px;
+}
+
+a {
+  color: inherit;
+}
+
+img,
+svg {
+  display: block;
+  max-width: 100%;
+}
+
+#root {
+  min-height: 100vh;
+  width: 100%;
+  margin: 0;
+}

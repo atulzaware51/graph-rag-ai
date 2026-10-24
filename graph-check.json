@@ -1,0 +1,2148 @@
+{
+    "status":  "success",
+    "dataset_count":  33,
+    "relationship_candidate_count":  0,
+    "node_count":  169,
+    "edge_count":  136,
+    "nodes":  [
+                  {
+                      "id":  "dataset:9892e6896d634518bda09bbca8a8cf9b",
+                      "type":  "Dataset",
+                      "label":  "smart_class_energy_data.xlsx",
+                      "dataset_id":  "9892e6896d634518bda09bbca8a8cf9b",
+                      "table_name":  "dataset_9892e6896d634518bda09bbca8a8cf9b"
+                  },
+                  {
+                      "id":  "column:9892e6896d634518bda09bbca8a8cf9b:num_students",
+                      "type":  "Column",
+                      "label":  "num_students",
+                      "dataset_id":  "9892e6896d634518bda09bbca8a8cf9b",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:9892e6896d634518bda09bbca8a8cf9b:outdoor_temp",
+                      "type":  "Column",
+                      "label":  "outdoor_temp",
+                      "dataset_id":  "9892e6896d634518bda09bbca8a8cf9b",
+                      "data_type":  "REAL",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:9892e6896d634518bda09bbca8a8cf9b:time_of_day",
+                      "type":  "Column",
+                      "label":  "time_of_day",
+                      "dataset_id":  "9892e6896d634518bda09bbca8a8cf9b",
+                      "data_type":  "TEXT",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:9892e6896d634518bda09bbca8a8cf9b:humidity",
+                      "type":  "Column",
+                      "label":  "humidity",
+                      "dataset_id":  "9892e6896d634518bda09bbca8a8cf9b",
+                      "data_type":  "REAL",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:9892e6896d634518bda09bbca8a8cf9b:lights_on",
+                      "type":  "Column",
+                      "label":  "lights_on",
+                      "dataset_id":  "9892e6896d634518bda09bbca8a8cf9b",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:9892e6896d634518bda09bbca8a8cf9b:windows_open",
+                      "type":  "Column",
+                      "label":  "windows_open",
+                      "dataset_id":  "9892e6896d634518bda09bbca8a8cf9b",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:9892e6896d634518bda09bbca8a8cf9b:fan_speed",
+                      "type":  "Column",
+                      "label":  "fan_speed",
+                      "dataset_id":  "9892e6896d634518bda09bbca8a8cf9b",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:9892e6896d634518bda09bbca8a8cf9b:ac_temp",
+                      "type":  "Column",
+                      "label":  "ac_temp",
+                      "dataset_id":  "9892e6896d634518bda09bbca8a8cf9b",
+                      "data_type":  "REAL",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "dataset:6c04547fea2b4f83aede059d2c36e5fa",
+                      "type":  "Dataset",
+                      "label":  "insurance.csv",
+                      "dataset_id":  "6c04547fea2b4f83aede059d2c36e5fa",
+                      "table_name":  "dataset_6c04547fea2b4f83aede059d2c36e5fa"
+                  },
+                  {
+                      "id":  "column:6c04547fea2b4f83aede059d2c36e5fa:age",
+                      "type":  "Column",
+                      "label":  "age",
+                      "dataset_id":  "6c04547fea2b4f83aede059d2c36e5fa",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:6c04547fea2b4f83aede059d2c36e5fa:sex",
+                      "type":  "Column",
+                      "label":  "sex",
+                      "dataset_id":  "6c04547fea2b4f83aede059d2c36e5fa",
+                      "data_type":  "TEXT",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:6c04547fea2b4f83aede059d2c36e5fa:bmi",
+                      "type":  "Column",
+                      "label":  "bmi",
+                      "dataset_id":  "6c04547fea2b4f83aede059d2c36e5fa",
+                      "data_type":  "REAL",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:6c04547fea2b4f83aede059d2c36e5fa:children",
+                      "type":  "Column",
+                      "label":  "children",
+                      "dataset_id":  "6c04547fea2b4f83aede059d2c36e5fa",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:6c04547fea2b4f83aede059d2c36e5fa:smoker",
+                      "type":  "Column",
+                      "label":  "smoker",
+                      "dataset_id":  "6c04547fea2b4f83aede059d2c36e5fa",
+                      "data_type":  "TEXT",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:6c04547fea2b4f83aede059d2c36e5fa:region",
+                      "type":  "Column",
+                      "label":  "region",
+                      "dataset_id":  "6c04547fea2b4f83aede059d2c36e5fa",
+                      "data_type":  "TEXT",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:6c04547fea2b4f83aede059d2c36e5fa:charges",
+                      "type":  "Column",
+                      "label":  "charges",
+                      "dataset_id":  "6c04547fea2b4f83aede059d2c36e5fa",
+                      "data_type":  "REAL",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "dataset:e90bac2ffc4248398088dd31b331800a",
+                      "type":  "Dataset",
+                      "label":  "insurance.csv",
+                      "dataset_id":  "e90bac2ffc4248398088dd31b331800a",
+                      "table_name":  "dataset_e90bac2ffc4248398088dd31b331800a"
+                  },
+                  {
+                      "id":  "column:e90bac2ffc4248398088dd31b331800a:age",
+                      "type":  "Column",
+                      "label":  "age",
+                      "dataset_id":  "e90bac2ffc4248398088dd31b331800a",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:e90bac2ffc4248398088dd31b331800a:sex",
+                      "type":  "Column",
+                      "label":  "sex",
+                      "dataset_id":  "e90bac2ffc4248398088dd31b331800a",
+                      "data_type":  "TEXT",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:e90bac2ffc4248398088dd31b331800a:bmi",
+                      "type":  "Column",
+                      "label":  "bmi",
+                      "dataset_id":  "e90bac2ffc4248398088dd31b331800a",
+                      "data_type":  "REAL",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:e90bac2ffc4248398088dd31b331800a:children",
+                      "type":  "Column",
+                      "label":  "children",
+                      "dataset_id":  "e90bac2ffc4248398088dd31b331800a",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:e90bac2ffc4248398088dd31b331800a:smoker",
+                      "type":  "Column",
+                      "label":  "smoker",
+                      "dataset_id":  "e90bac2ffc4248398088dd31b331800a",
+                      "data_type":  "TEXT",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:e90bac2ffc4248398088dd31b331800a:region",
+                      "type":  "Column",
+                      "label":  "region",
+                      "dataset_id":  "e90bac2ffc4248398088dd31b331800a",
+                      "data_type":  "TEXT",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:e90bac2ffc4248398088dd31b331800a:charges",
+                      "type":  "Column",
+                      "label":  "charges",
+                      "dataset_id":  "e90bac2ffc4248398088dd31b331800a",
+                      "data_type":  "REAL",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "dataset:4ebb9e4b112f4537a24743efb84cf52f",
+                      "type":  "Dataset",
+                      "label":  "insurance.csv",
+                      "dataset_id":  "4ebb9e4b112f4537a24743efb84cf52f",
+                      "table_name":  "dataset_4ebb9e4b112f4537a24743efb84cf52f"
+                  },
+                  {
+                      "id":  "column:4ebb9e4b112f4537a24743efb84cf52f:age",
+                      "type":  "Column",
+                      "label":  "age",
+                      "dataset_id":  "4ebb9e4b112f4537a24743efb84cf52f",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:4ebb9e4b112f4537a24743efb84cf52f:sex",
+                      "type":  "Column",
+                      "label":  "sex",
+                      "dataset_id":  "4ebb9e4b112f4537a24743efb84cf52f",
+                      "data_type":  "TEXT",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:4ebb9e4b112f4537a24743efb84cf52f:bmi",
+                      "type":  "Column",
+                      "label":  "bmi",
+                      "dataset_id":  "4ebb9e4b112f4537a24743efb84cf52f",
+                      "data_type":  "REAL",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:4ebb9e4b112f4537a24743efb84cf52f:children",
+                      "type":  "Column",
+                      "label":  "children",
+                      "dataset_id":  "4ebb9e4b112f4537a24743efb84cf52f",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:4ebb9e4b112f4537a24743efb84cf52f:smoker",
+                      "type":  "Column",
+                      "label":  "smoker",
+                      "dataset_id":  "4ebb9e4b112f4537a24743efb84cf52f",
+                      "data_type":  "TEXT",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:4ebb9e4b112f4537a24743efb84cf52f:region",
+                      "type":  "Column",
+                      "label":  "region",
+                      "dataset_id":  "4ebb9e4b112f4537a24743efb84cf52f",
+                      "data_type":  "TEXT",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:4ebb9e4b112f4537a24743efb84cf52f:charges",
+                      "type":  "Column",
+                      "label":  "charges",
+                      "dataset_id":  "4ebb9e4b112f4537a24743efb84cf52f",
+                      "data_type":  "REAL",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "dataset:5f382aef22e7420188d367d7fade962d",
+                      "type":  "Dataset",
+                      "label":  "sales.csv",
+                      "dataset_id":  "5f382aef22e7420188d367d7fade962d",
+                      "table_name":  "dataset_5f382aef22e7420188d367d7fade962d"
+                  },
+                  {
+                      "id":  "column:5f382aef22e7420188d367d7fade962d:product",
+                      "type":  "Column",
+                      "label":  "product",
+                      "dataset_id":  "5f382aef22e7420188d367d7fade962d",
+                      "data_type":  "TEXT",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:5f382aef22e7420188d367d7fade962d:quantity",
+                      "type":  "Column",
+                      "label":  "quantity",
+                      "dataset_id":  "5f382aef22e7420188d367d7fade962d",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:5f382aef22e7420188d367d7fade962d:price",
+                      "type":  "Column",
+                      "label":  "price",
+                      "dataset_id":  "5f382aef22e7420188d367d7fade962d",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "dataset:6a4977699fe64bda961a09b0ff1e7d7e",
+                      "type":  "Dataset",
+                      "label":  "sales.csv",
+                      "dataset_id":  "6a4977699fe64bda961a09b0ff1e7d7e",
+                      "table_name":  "dataset_6a4977699fe64bda961a09b0ff1e7d7e"
+                  },
+                  {
+                      "id":  "column:6a4977699fe64bda961a09b0ff1e7d7e:product",
+                      "type":  "Column",
+                      "label":  "product",
+                      "dataset_id":  "6a4977699fe64bda961a09b0ff1e7d7e",
+                      "data_type":  "TEXT",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:6a4977699fe64bda961a09b0ff1e7d7e:quantity",
+                      "type":  "Column",
+                      "label":  "quantity",
+                      "dataset_id":  "6a4977699fe64bda961a09b0ff1e7d7e",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:6a4977699fe64bda961a09b0ff1e7d7e:price",
+                      "type":  "Column",
+                      "label":  "price",
+                      "dataset_id":  "6a4977699fe64bda961a09b0ff1e7d7e",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "dataset:5020920d05094125ae60a5e485d2d5eb",
+                      "type":  "Dataset",
+                      "label":  "sales.csv",
+                      "dataset_id":  "5020920d05094125ae60a5e485d2d5eb",
+                      "table_name":  "dataset_5020920d05094125ae60a5e485d2d5eb"
+                  },
+                  {
+                      "id":  "column:5020920d05094125ae60a5e485d2d5eb:product",
+                      "type":  "Column",
+                      "label":  "product",
+                      "dataset_id":  "5020920d05094125ae60a5e485d2d5eb",
+                      "data_type":  "TEXT",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:5020920d05094125ae60a5e485d2d5eb:quantity",
+                      "type":  "Column",
+                      "label":  "quantity",
+                      "dataset_id":  "5020920d05094125ae60a5e485d2d5eb",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:5020920d05094125ae60a5e485d2d5eb:price",
+                      "type":  "Column",
+                      "label":  "price",
+                      "dataset_id":  "5020920d05094125ae60a5e485d2d5eb",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "dataset:f547f7ea665545fc9347ca354f27a76c",
+                      "type":  "Dataset",
+                      "label":  "sales.csv",
+                      "dataset_id":  "f547f7ea665545fc9347ca354f27a76c",
+                      "table_name":  "dataset_f547f7ea665545fc9347ca354f27a76c"
+                  },
+                  {
+                      "id":  "column:f547f7ea665545fc9347ca354f27a76c:product",
+                      "type":  "Column",
+                      "label":  "product",
+                      "dataset_id":  "f547f7ea665545fc9347ca354f27a76c",
+                      "data_type":  "TEXT",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:f547f7ea665545fc9347ca354f27a76c:quantity",
+                      "type":  "Column",
+                      "label":  "quantity",
+                      "dataset_id":  "f547f7ea665545fc9347ca354f27a76c",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:f547f7ea665545fc9347ca354f27a76c:price",
+                      "type":  "Column",
+                      "label":  "price",
+                      "dataset_id":  "f547f7ea665545fc9347ca354f27a76c",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "dataset:3588e68c267941ee94a4649c4dad07d8",
+                      "type":  "Dataset",
+                      "label":  "sales.csv",
+                      "dataset_id":  "3588e68c267941ee94a4649c4dad07d8",
+                      "table_name":  "dataset_3588e68c267941ee94a4649c4dad07d8"
+                  },
+                  {
+                      "id":  "column:3588e68c267941ee94a4649c4dad07d8:product",
+                      "type":  "Column",
+                      "label":  "product",
+                      "dataset_id":  "3588e68c267941ee94a4649c4dad07d8",
+                      "data_type":  "TEXT",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:3588e68c267941ee94a4649c4dad07d8:quantity",
+                      "type":  "Column",
+                      "label":  "quantity",
+                      "dataset_id":  "3588e68c267941ee94a4649c4dad07d8",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:3588e68c267941ee94a4649c4dad07d8:price",
+                      "type":  "Column",
+                      "label":  "price",
+                      "dataset_id":  "3588e68c267941ee94a4649c4dad07d8",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "dataset:a261520221e04f7bad98e26bd6ad3aa2",
+                      "type":  "Dataset",
+                      "label":  "sales.csv",
+                      "dataset_id":  "a261520221e04f7bad98e26bd6ad3aa2",
+                      "table_name":  "dataset_a261520221e04f7bad98e26bd6ad3aa2"
+                  },
+                  {
+                      "id":  "column:a261520221e04f7bad98e26bd6ad3aa2:product",
+                      "type":  "Column",
+                      "label":  "product",
+                      "dataset_id":  "a261520221e04f7bad98e26bd6ad3aa2",
+                      "data_type":  "TEXT",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:a261520221e04f7bad98e26bd6ad3aa2:quantity",
+                      "type":  "Column",
+                      "label":  "quantity",
+                      "dataset_id":  "a261520221e04f7bad98e26bd6ad3aa2",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:a261520221e04f7bad98e26bd6ad3aa2:price",
+                      "type":  "Column",
+                      "label":  "price",
+                      "dataset_id":  "a261520221e04f7bad98e26bd6ad3aa2",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "dataset:56ff8a1d4f8c4d93b5d2b7c9d23d9611",
+                      "type":  "Dataset",
+                      "label":  "sales.csv",
+                      "dataset_id":  "56ff8a1d4f8c4d93b5d2b7c9d23d9611",
+                      "table_name":  "dataset_56ff8a1d4f8c4d93b5d2b7c9d23d9611"
+                  },
+                  {
+                      "id":  "column:56ff8a1d4f8c4d93b5d2b7c9d23d9611:product",
+                      "type":  "Column",
+                      "label":  "product",
+                      "dataset_id":  "56ff8a1d4f8c4d93b5d2b7c9d23d9611",
+                      "data_type":  "TEXT",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:56ff8a1d4f8c4d93b5d2b7c9d23d9611:quantity",
+                      "type":  "Column",
+                      "label":  "quantity",
+                      "dataset_id":  "56ff8a1d4f8c4d93b5d2b7c9d23d9611",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:56ff8a1d4f8c4d93b5d2b7c9d23d9611:price",
+                      "type":  "Column",
+                      "label":  "price",
+                      "dataset_id":  "56ff8a1d4f8c4d93b5d2b7c9d23d9611",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "dataset:7c7401e8858e404b9d2dc8f1824bd713",
+                      "type":  "Dataset",
+                      "label":  "sales.csv",
+                      "dataset_id":  "7c7401e8858e404b9d2dc8f1824bd713",
+                      "table_name":  "dataset_7c7401e8858e404b9d2dc8f1824bd713"
+                  },
+                  {
+                      "id":  "column:7c7401e8858e404b9d2dc8f1824bd713:product",
+                      "type":  "Column",
+                      "label":  "product",
+                      "dataset_id":  "7c7401e8858e404b9d2dc8f1824bd713",
+                      "data_type":  "TEXT",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:7c7401e8858e404b9d2dc8f1824bd713:quantity",
+                      "type":  "Column",
+                      "label":  "quantity",
+                      "dataset_id":  "7c7401e8858e404b9d2dc8f1824bd713",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:7c7401e8858e404b9d2dc8f1824bd713:price",
+                      "type":  "Column",
+                      "label":  "price",
+                      "dataset_id":  "7c7401e8858e404b9d2dc8f1824bd713",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "dataset:b39861519414496c85780ca9273ad941",
+                      "type":  "Dataset",
+                      "label":  "sales.csv",
+                      "dataset_id":  "b39861519414496c85780ca9273ad941",
+                      "table_name":  "dataset_b39861519414496c85780ca9273ad941"
+                  },
+                  {
+                      "id":  "column:b39861519414496c85780ca9273ad941:product",
+                      "type":  "Column",
+                      "label":  "product",
+                      "dataset_id":  "b39861519414496c85780ca9273ad941",
+                      "data_type":  "TEXT",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:b39861519414496c85780ca9273ad941:quantity",
+                      "type":  "Column",
+                      "label":  "quantity",
+                      "dataset_id":  "b39861519414496c85780ca9273ad941",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:b39861519414496c85780ca9273ad941:price",
+                      "type":  "Column",
+                      "label":  "price",
+                      "dataset_id":  "b39861519414496c85780ca9273ad941",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "dataset:5587126695f24db389bb552b737e507a",
+                      "type":  "Dataset",
+                      "label":  "sales.csv",
+                      "dataset_id":  "5587126695f24db389bb552b737e507a",
+                      "table_name":  "dataset_5587126695f24db389bb552b737e507a"
+                  },
+                  {
+                      "id":  "column:5587126695f24db389bb552b737e507a:product",
+                      "type":  "Column",
+                      "label":  "product",
+                      "dataset_id":  "5587126695f24db389bb552b737e507a",
+                      "data_type":  "TEXT",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:5587126695f24db389bb552b737e507a:quantity",
+                      "type":  "Column",
+                      "label":  "quantity",
+                      "dataset_id":  "5587126695f24db389bb552b737e507a",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:5587126695f24db389bb552b737e507a:price",
+                      "type":  "Column",
+                      "label":  "price",
+                      "dataset_id":  "5587126695f24db389bb552b737e507a",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "dataset:f802a777793f4fca8595cdb769efa684",
+                      "type":  "Dataset",
+                      "label":  "sales.csv",
+                      "dataset_id":  "f802a777793f4fca8595cdb769efa684",
+                      "table_name":  "dataset_f802a777793f4fca8595cdb769efa684"
+                  },
+                  {
+                      "id":  "column:f802a777793f4fca8595cdb769efa684:product",
+                      "type":  "Column",
+                      "label":  "product",
+                      "dataset_id":  "f802a777793f4fca8595cdb769efa684",
+                      "data_type":  "TEXT",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:f802a777793f4fca8595cdb769efa684:quantity",
+                      "type":  "Column",
+                      "label":  "quantity",
+                      "dataset_id":  "f802a777793f4fca8595cdb769efa684",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:f802a777793f4fca8595cdb769efa684:price",
+                      "type":  "Column",
+                      "label":  "price",
+                      "dataset_id":  "f802a777793f4fca8595cdb769efa684",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "dataset:b8fae548694c479299d1206bfa7bb836",
+                      "type":  "Dataset",
+                      "label":  "sales.csv",
+                      "dataset_id":  "b8fae548694c479299d1206bfa7bb836",
+                      "table_name":  "dataset_b8fae548694c479299d1206bfa7bb836"
+                  },
+                  {
+                      "id":  "column:b8fae548694c479299d1206bfa7bb836:product",
+                      "type":  "Column",
+                      "label":  "product",
+                      "dataset_id":  "b8fae548694c479299d1206bfa7bb836",
+                      "data_type":  "TEXT",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:b8fae548694c479299d1206bfa7bb836:quantity",
+                      "type":  "Column",
+                      "label":  "quantity",
+                      "dataset_id":  "b8fae548694c479299d1206bfa7bb836",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:b8fae548694c479299d1206bfa7bb836:price",
+                      "type":  "Column",
+                      "label":  "price",
+                      "dataset_id":  "b8fae548694c479299d1206bfa7bb836",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "dataset:f45a67bd8e6740c7b1adef04f2b0ac6f",
+                      "type":  "Dataset",
+                      "label":  "sales.csv",
+                      "dataset_id":  "f45a67bd8e6740c7b1adef04f2b0ac6f",
+                      "table_name":  "dataset_f45a67bd8e6740c7b1adef04f2b0ac6f"
+                  },
+                  {
+                      "id":  "column:f45a67bd8e6740c7b1adef04f2b0ac6f:product",
+                      "type":  "Column",
+                      "label":  "product",
+                      "dataset_id":  "f45a67bd8e6740c7b1adef04f2b0ac6f",
+                      "data_type":  "TEXT",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:f45a67bd8e6740c7b1adef04f2b0ac6f:quantity",
+                      "type":  "Column",
+                      "label":  "quantity",
+                      "dataset_id":  "f45a67bd8e6740c7b1adef04f2b0ac6f",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:f45a67bd8e6740c7b1adef04f2b0ac6f:price",
+                      "type":  "Column",
+                      "label":  "price",
+                      "dataset_id":  "f45a67bd8e6740c7b1adef04f2b0ac6f",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "dataset:aad94fccb6ec42ad8d1356c9e580c58d",
+                      "type":  "Dataset",
+                      "label":  "sales.csv",
+                      "dataset_id":  "aad94fccb6ec42ad8d1356c9e580c58d",
+                      "table_name":  "dataset_aad94fccb6ec42ad8d1356c9e580c58d"
+                  },
+                  {
+                      "id":  "column:aad94fccb6ec42ad8d1356c9e580c58d:product",
+                      "type":  "Column",
+                      "label":  "product",
+                      "dataset_id":  "aad94fccb6ec42ad8d1356c9e580c58d",
+                      "data_type":  "TEXT",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:aad94fccb6ec42ad8d1356c9e580c58d:quantity",
+                      "type":  "Column",
+                      "label":  "quantity",
+                      "dataset_id":  "aad94fccb6ec42ad8d1356c9e580c58d",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:aad94fccb6ec42ad8d1356c9e580c58d:price",
+                      "type":  "Column",
+                      "label":  "price",
+                      "dataset_id":  "aad94fccb6ec42ad8d1356c9e580c58d",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "dataset:5f867b8a91e149dfb5acfb3b914dcf6c",
+                      "type":  "Dataset",
+                      "label":  "sales.csv",
+                      "dataset_id":  "5f867b8a91e149dfb5acfb3b914dcf6c",
+                      "table_name":  "dataset_5f867b8a91e149dfb5acfb3b914dcf6c"
+                  },
+                  {
+                      "id":  "column:5f867b8a91e149dfb5acfb3b914dcf6c:product",
+                      "type":  "Column",
+                      "label":  "product",
+                      "dataset_id":  "5f867b8a91e149dfb5acfb3b914dcf6c",
+                      "data_type":  "TEXT",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:5f867b8a91e149dfb5acfb3b914dcf6c:quantity",
+                      "type":  "Column",
+                      "label":  "quantity",
+                      "dataset_id":  "5f867b8a91e149dfb5acfb3b914dcf6c",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:5f867b8a91e149dfb5acfb3b914dcf6c:price",
+                      "type":  "Column",
+                      "label":  "price",
+                      "dataset_id":  "5f867b8a91e149dfb5acfb3b914dcf6c",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "dataset:681e8f6277454785841950991bb19bd8",
+                      "type":  "Dataset",
+                      "label":  "insurance.csv",
+                      "dataset_id":  "681e8f6277454785841950991bb19bd8",
+                      "table_name":  "dataset_681e8f6277454785841950991bb19bd8"
+                  },
+                  {
+                      "id":  "column:681e8f6277454785841950991bb19bd8:age",
+                      "type":  "Column",
+                      "label":  "age",
+                      "dataset_id":  "681e8f6277454785841950991bb19bd8",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:681e8f6277454785841950991bb19bd8:sex",
+                      "type":  "Column",
+                      "label":  "sex",
+                      "dataset_id":  "681e8f6277454785841950991bb19bd8",
+                      "data_type":  "TEXT",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:681e8f6277454785841950991bb19bd8:bmi",
+                      "type":  "Column",
+                      "label":  "bmi",
+                      "dataset_id":  "681e8f6277454785841950991bb19bd8",
+                      "data_type":  "REAL",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:681e8f6277454785841950991bb19bd8:children",
+                      "type":  "Column",
+                      "label":  "children",
+                      "dataset_id":  "681e8f6277454785841950991bb19bd8",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:681e8f6277454785841950991bb19bd8:smoker",
+                      "type":  "Column",
+                      "label":  "smoker",
+                      "dataset_id":  "681e8f6277454785841950991bb19bd8",
+                      "data_type":  "TEXT",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:681e8f6277454785841950991bb19bd8:region",
+                      "type":  "Column",
+                      "label":  "region",
+                      "dataset_id":  "681e8f6277454785841950991bb19bd8",
+                      "data_type":  "TEXT",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:681e8f6277454785841950991bb19bd8:charges",
+                      "type":  "Column",
+                      "label":  "charges",
+                      "dataset_id":  "681e8f6277454785841950991bb19bd8",
+                      "data_type":  "REAL",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "dataset:8a4c7848b4424b0f9b313e4902fab787",
+                      "type":  "Dataset",
+                      "label":  "sales.csv",
+                      "dataset_id":  "8a4c7848b4424b0f9b313e4902fab787",
+                      "table_name":  "dataset_8a4c7848b4424b0f9b313e4902fab787"
+                  },
+                  {
+                      "id":  "column:8a4c7848b4424b0f9b313e4902fab787:product",
+                      "type":  "Column",
+                      "label":  "product",
+                      "dataset_id":  "8a4c7848b4424b0f9b313e4902fab787",
+                      "data_type":  "TEXT",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:8a4c7848b4424b0f9b313e4902fab787:quantity",
+                      "type":  "Column",
+                      "label":  "quantity",
+                      "dataset_id":  "8a4c7848b4424b0f9b313e4902fab787",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:8a4c7848b4424b0f9b313e4902fab787:price",
+                      "type":  "Column",
+                      "label":  "price",
+                      "dataset_id":  "8a4c7848b4424b0f9b313e4902fab787",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "dataset:c9329b8aaad74f6cbb5e38f49ca188ba",
+                      "type":  "Dataset",
+                      "label":  "insurance.csv",
+                      "dataset_id":  "c9329b8aaad74f6cbb5e38f49ca188ba",
+                      "table_name":  "dataset_c9329b8aaad74f6cbb5e38f49ca188ba"
+                  },
+                  {
+                      "id":  "column:c9329b8aaad74f6cbb5e38f49ca188ba:age",
+                      "type":  "Column",
+                      "label":  "age",
+                      "dataset_id":  "c9329b8aaad74f6cbb5e38f49ca188ba",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:c9329b8aaad74f6cbb5e38f49ca188ba:sex",
+                      "type":  "Column",
+                      "label":  "sex",
+                      "dataset_id":  "c9329b8aaad74f6cbb5e38f49ca188ba",
+                      "data_type":  "TEXT",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:c9329b8aaad74f6cbb5e38f49ca188ba:bmi",
+                      "type":  "Column",
+                      "label":  "bmi",
+                      "dataset_id":  "c9329b8aaad74f6cbb5e38f49ca188ba",
+                      "data_type":  "REAL",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:c9329b8aaad74f6cbb5e38f49ca188ba:children",
+                      "type":  "Column",
+                      "label":  "children",
+                      "dataset_id":  "c9329b8aaad74f6cbb5e38f49ca188ba",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:c9329b8aaad74f6cbb5e38f49ca188ba:smoker",
+                      "type":  "Column",
+                      "label":  "smoker",
+                      "dataset_id":  "c9329b8aaad74f6cbb5e38f49ca188ba",
+                      "data_type":  "TEXT",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:c9329b8aaad74f6cbb5e38f49ca188ba:region",
+                      "type":  "Column",
+                      "label":  "region",
+                      "dataset_id":  "c9329b8aaad74f6cbb5e38f49ca188ba",
+                      "data_type":  "TEXT",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:c9329b8aaad74f6cbb5e38f49ca188ba:charges",
+                      "type":  "Column",
+                      "label":  "charges",
+                      "dataset_id":  "c9329b8aaad74f6cbb5e38f49ca188ba",
+                      "data_type":  "REAL",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "dataset:9b6afe36aab140d2bc8c369f78441179",
+                      "type":  "Dataset",
+                      "label":  "sales.csv",
+                      "dataset_id":  "9b6afe36aab140d2bc8c369f78441179",
+                      "table_name":  "dataset_9b6afe36aab140d2bc8c369f78441179"
+                  },
+                  {
+                      "id":  "column:9b6afe36aab140d2bc8c369f78441179:product",
+                      "type":  "Column",
+                      "label":  "product",
+                      "dataset_id":  "9b6afe36aab140d2bc8c369f78441179",
+                      "data_type":  "TEXT",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:9b6afe36aab140d2bc8c369f78441179:quantity",
+                      "type":  "Column",
+                      "label":  "quantity",
+                      "dataset_id":  "9b6afe36aab140d2bc8c369f78441179",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:9b6afe36aab140d2bc8c369f78441179:price",
+                      "type":  "Column",
+                      "label":  "price",
+                      "dataset_id":  "9b6afe36aab140d2bc8c369f78441179",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "dataset:01ec47fdeb0e4654ae7440606e42d8a7",
+                      "type":  "Dataset",
+                      "label":  "sales.csv",
+                      "dataset_id":  "01ec47fdeb0e4654ae7440606e42d8a7",
+                      "table_name":  "dataset_01ec47fdeb0e4654ae7440606e42d8a7"
+                  },
+                  {
+                      "id":  "column:01ec47fdeb0e4654ae7440606e42d8a7:product",
+                      "type":  "Column",
+                      "label":  "product",
+                      "dataset_id":  "01ec47fdeb0e4654ae7440606e42d8a7",
+                      "data_type":  "TEXT",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:01ec47fdeb0e4654ae7440606e42d8a7:quantity",
+                      "type":  "Column",
+                      "label":  "quantity",
+                      "dataset_id":  "01ec47fdeb0e4654ae7440606e42d8a7",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:01ec47fdeb0e4654ae7440606e42d8a7:price",
+                      "type":  "Column",
+                      "label":  "price",
+                      "dataset_id":  "01ec47fdeb0e4654ae7440606e42d8a7",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "dataset:436c342d6f524527b35f795377f51932",
+                      "type":  "Dataset",
+                      "label":  "sales.csv",
+                      "dataset_id":  "436c342d6f524527b35f795377f51932",
+                      "table_name":  "dataset_436c342d6f524527b35f795377f51932"
+                  },
+                  {
+                      "id":  "column:436c342d6f524527b35f795377f51932:product",
+                      "type":  "Column",
+                      "label":  "product",
+                      "dataset_id":  "436c342d6f524527b35f795377f51932",
+                      "data_type":  "TEXT",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:436c342d6f524527b35f795377f51932:quantity",
+                      "type":  "Column",
+                      "label":  "quantity",
+                      "dataset_id":  "436c342d6f524527b35f795377f51932",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:436c342d6f524527b35f795377f51932:price",
+                      "type":  "Column",
+                      "label":  "price",
+                      "dataset_id":  "436c342d6f524527b35f795377f51932",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "dataset:235cdd1781e547a089e06a0552e83da2",
+                      "type":  "Dataset",
+                      "label":  "sales.csv",
+                      "dataset_id":  "235cdd1781e547a089e06a0552e83da2",
+                      "table_name":  "dataset_235cdd1781e547a089e06a0552e83da2"
+                  },
+                  {
+                      "id":  "column:235cdd1781e547a089e06a0552e83da2:product",
+                      "type":  "Column",
+                      "label":  "product",
+                      "dataset_id":  "235cdd1781e547a089e06a0552e83da2",
+                      "data_type":  "TEXT",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:235cdd1781e547a089e06a0552e83da2:quantity",
+                      "type":  "Column",
+                      "label":  "quantity",
+                      "dataset_id":  "235cdd1781e547a089e06a0552e83da2",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:235cdd1781e547a089e06a0552e83da2:price",
+                      "type":  "Column",
+                      "label":  "price",
+                      "dataset_id":  "235cdd1781e547a089e06a0552e83da2",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "dataset:450c0a926d4f4499adfbe6cdc67504ff",
+                      "type":  "Dataset",
+                      "label":  "insurance.csv",
+                      "dataset_id":  "450c0a926d4f4499adfbe6cdc67504ff",
+                      "table_name":  "dataset_450c0a926d4f4499adfbe6cdc67504ff"
+                  },
+                  {
+                      "id":  "column:450c0a926d4f4499adfbe6cdc67504ff:age",
+                      "type":  "Column",
+                      "label":  "age",
+                      "dataset_id":  "450c0a926d4f4499adfbe6cdc67504ff",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:450c0a926d4f4499adfbe6cdc67504ff:sex",
+                      "type":  "Column",
+                      "label":  "sex",
+                      "dataset_id":  "450c0a926d4f4499adfbe6cdc67504ff",
+                      "data_type":  "TEXT",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:450c0a926d4f4499adfbe6cdc67504ff:bmi",
+                      "type":  "Column",
+                      "label":  "bmi",
+                      "dataset_id":  "450c0a926d4f4499adfbe6cdc67504ff",
+                      "data_type":  "REAL",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:450c0a926d4f4499adfbe6cdc67504ff:children",
+                      "type":  "Column",
+                      "label":  "children",
+                      "dataset_id":  "450c0a926d4f4499adfbe6cdc67504ff",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:450c0a926d4f4499adfbe6cdc67504ff:smoker",
+                      "type":  "Column",
+                      "label":  "smoker",
+                      "dataset_id":  "450c0a926d4f4499adfbe6cdc67504ff",
+                      "data_type":  "TEXT",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:450c0a926d4f4499adfbe6cdc67504ff:region",
+                      "type":  "Column",
+                      "label":  "region",
+                      "dataset_id":  "450c0a926d4f4499adfbe6cdc67504ff",
+                      "data_type":  "TEXT",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:450c0a926d4f4499adfbe6cdc67504ff:charges",
+                      "type":  "Column",
+                      "label":  "charges",
+                      "dataset_id":  "450c0a926d4f4499adfbe6cdc67504ff",
+                      "data_type":  "REAL",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "dataset:72a45ebe0f3f45a8a7939485c0f647a6",
+                      "type":  "Dataset",
+                      "label":  "sales.csv",
+                      "dataset_id":  "72a45ebe0f3f45a8a7939485c0f647a6",
+                      "table_name":  "dataset_72a45ebe0f3f45a8a7939485c0f647a6"
+                  },
+                  {
+                      "id":  "column:72a45ebe0f3f45a8a7939485c0f647a6:product",
+                      "type":  "Column",
+                      "label":  "product",
+                      "dataset_id":  "72a45ebe0f3f45a8a7939485c0f647a6",
+                      "data_type":  "TEXT",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:72a45ebe0f3f45a8a7939485c0f647a6:quantity",
+                      "type":  "Column",
+                      "label":  "quantity",
+                      "dataset_id":  "72a45ebe0f3f45a8a7939485c0f647a6",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:72a45ebe0f3f45a8a7939485c0f647a6:price",
+                      "type":  "Column",
+                      "label":  "price",
+                      "dataset_id":  "72a45ebe0f3f45a8a7939485c0f647a6",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "dataset:daa7fddaee7e473f88775520db355b38",
+                      "type":  "Dataset",
+                      "label":  "insurance.csv",
+                      "dataset_id":  "daa7fddaee7e473f88775520db355b38",
+                      "table_name":  "dataset_daa7fddaee7e473f88775520db355b38"
+                  },
+                  {
+                      "id":  "column:daa7fddaee7e473f88775520db355b38:age",
+                      "type":  "Column",
+                      "label":  "age",
+                      "dataset_id":  "daa7fddaee7e473f88775520db355b38",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:daa7fddaee7e473f88775520db355b38:sex",
+                      "type":  "Column",
+                      "label":  "sex",
+                      "dataset_id":  "daa7fddaee7e473f88775520db355b38",
+                      "data_type":  "TEXT",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:daa7fddaee7e473f88775520db355b38:bmi",
+                      "type":  "Column",
+                      "label":  "bmi",
+                      "dataset_id":  "daa7fddaee7e473f88775520db355b38",
+                      "data_type":  "REAL",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:daa7fddaee7e473f88775520db355b38:children",
+                      "type":  "Column",
+                      "label":  "children",
+                      "dataset_id":  "daa7fddaee7e473f88775520db355b38",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:daa7fddaee7e473f88775520db355b38:smoker",
+                      "type":  "Column",
+                      "label":  "smoker",
+                      "dataset_id":  "daa7fddaee7e473f88775520db355b38",
+                      "data_type":  "TEXT",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:daa7fddaee7e473f88775520db355b38:region",
+                      "type":  "Column",
+                      "label":  "region",
+                      "dataset_id":  "daa7fddaee7e473f88775520db355b38",
+                      "data_type":  "TEXT",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:daa7fddaee7e473f88775520db355b38:charges",
+                      "type":  "Column",
+                      "label":  "charges",
+                      "dataset_id":  "daa7fddaee7e473f88775520db355b38",
+                      "data_type":  "REAL",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "dataset:776c2bdd3c944bc6be9644c254e76a4e",
+                      "type":  "Dataset",
+                      "label":  "sales.csv",
+                      "dataset_id":  "776c2bdd3c944bc6be9644c254e76a4e",
+                      "table_name":  "dataset_776c2bdd3c944bc6be9644c254e76a4e"
+                  },
+                  {
+                      "id":  "column:776c2bdd3c944bc6be9644c254e76a4e:product",
+                      "type":  "Column",
+                      "label":  "product",
+                      "dataset_id":  "776c2bdd3c944bc6be9644c254e76a4e",
+                      "data_type":  "TEXT",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:776c2bdd3c944bc6be9644c254e76a4e:quantity",
+                      "type":  "Column",
+                      "label":  "quantity",
+                      "dataset_id":  "776c2bdd3c944bc6be9644c254e76a4e",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:776c2bdd3c944bc6be9644c254e76a4e:price",
+                      "type":  "Column",
+                      "label":  "price",
+                      "dataset_id":  "776c2bdd3c944bc6be9644c254e76a4e",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "dataset:398c32edc78d4cbaa3c482c4287512ca",
+                      "type":  "Dataset",
+                      "label":  "sales.csv",
+                      "dataset_id":  "398c32edc78d4cbaa3c482c4287512ca",
+                      "table_name":  "dataset_398c32edc78d4cbaa3c482c4287512ca"
+                  },
+                  {
+                      "id":  "column:398c32edc78d4cbaa3c482c4287512ca:product",
+                      "type":  "Column",
+                      "label":  "product",
+                      "dataset_id":  "398c32edc78d4cbaa3c482c4287512ca",
+                      "data_type":  "TEXT",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:398c32edc78d4cbaa3c482c4287512ca:quantity",
+                      "type":  "Column",
+                      "label":  "quantity",
+                      "dataset_id":  "398c32edc78d4cbaa3c482c4287512ca",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:398c32edc78d4cbaa3c482c4287512ca:price",
+                      "type":  "Column",
+                      "label":  "price",
+                      "dataset_id":  "398c32edc78d4cbaa3c482c4287512ca",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "dataset:0bc87e499ab647498e4119d76db4049c",
+                      "type":  "Dataset",
+                      "label":  "sales.csv",
+                      "dataset_id":  "0bc87e499ab647498e4119d76db4049c",
+                      "table_name":  "dataset_0bc87e499ab647498e4119d76db4049c"
+                  },
+                  {
+                      "id":  "column:0bc87e499ab647498e4119d76db4049c:product",
+                      "type":  "Column",
+                      "label":  "product",
+                      "dataset_id":  "0bc87e499ab647498e4119d76db4049c",
+                      "data_type":  "TEXT",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:0bc87e499ab647498e4119d76db4049c:quantity",
+                      "type":  "Column",
+                      "label":  "quantity",
+                      "dataset_id":  "0bc87e499ab647498e4119d76db4049c",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:0bc87e499ab647498e4119d76db4049c:price",
+                      "type":  "Column",
+                      "label":  "price",
+                      "dataset_id":  "0bc87e499ab647498e4119d76db4049c",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "dataset:5a45cd450cdd476bb672582407f252e8",
+                      "type":  "Dataset",
+                      "label":  "insurance.csv",
+                      "dataset_id":  "5a45cd450cdd476bb672582407f252e8",
+                      "table_name":  "dataset_5a45cd450cdd476bb672582407f252e8"
+                  },
+                  {
+                      "id":  "column:5a45cd450cdd476bb672582407f252e8:age",
+                      "type":  "Column",
+                      "label":  "age",
+                      "dataset_id":  "5a45cd450cdd476bb672582407f252e8",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:5a45cd450cdd476bb672582407f252e8:sex",
+                      "type":  "Column",
+                      "label":  "sex",
+                      "dataset_id":  "5a45cd450cdd476bb672582407f252e8",
+                      "data_type":  "TEXT",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:5a45cd450cdd476bb672582407f252e8:bmi",
+                      "type":  "Column",
+                      "label":  "bmi",
+                      "dataset_id":  "5a45cd450cdd476bb672582407f252e8",
+                      "data_type":  "REAL",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:5a45cd450cdd476bb672582407f252e8:children",
+                      "type":  "Column",
+                      "label":  "children",
+                      "dataset_id":  "5a45cd450cdd476bb672582407f252e8",
+                      "data_type":  "INTEGER",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:5a45cd450cdd476bb672582407f252e8:smoker",
+                      "type":  "Column",
+                      "label":  "smoker",
+                      "dataset_id":  "5a45cd450cdd476bb672582407f252e8",
+                      "data_type":  "TEXT",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:5a45cd450cdd476bb672582407f252e8:region",
+                      "type":  "Column",
+                      "label":  "region",
+                      "dataset_id":  "5a45cd450cdd476bb672582407f252e8",
+                      "data_type":  "TEXT",
+                      "sql_name":  ""
+                  },
+                  {
+                      "id":  "column:5a45cd450cdd476bb672582407f252e8:charges",
+                      "type":  "Column",
+                      "label":  "charges",
+                      "dataset_id":  "5a45cd450cdd476bb672582407f252e8",
+                      "data_type":  "REAL",
+                      "sql_name":  ""
+                  }
+              ],
+    "edges":  [
+                  {
+                      "id":  "contains:9892e6896d634518bda09bbca8a8cf9b:num_students",
+                      "source":  "dataset:9892e6896d634518bda09bbca8a8cf9b",
+                      "target":  "column:9892e6896d634518bda09bbca8a8cf9b:num_students",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:9892e6896d634518bda09bbca8a8cf9b:outdoor_temp",
+                      "source":  "dataset:9892e6896d634518bda09bbca8a8cf9b",
+                      "target":  "column:9892e6896d634518bda09bbca8a8cf9b:outdoor_temp",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:9892e6896d634518bda09bbca8a8cf9b:time_of_day",
+                      "source":  "dataset:9892e6896d634518bda09bbca8a8cf9b",
+                      "target":  "column:9892e6896d634518bda09bbca8a8cf9b:time_of_day",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:9892e6896d634518bda09bbca8a8cf9b:humidity",
+                      "source":  "dataset:9892e6896d634518bda09bbca8a8cf9b",
+                      "target":  "column:9892e6896d634518bda09bbca8a8cf9b:humidity",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:9892e6896d634518bda09bbca8a8cf9b:lights_on",
+                      "source":  "dataset:9892e6896d634518bda09bbca8a8cf9b",
+                      "target":  "column:9892e6896d634518bda09bbca8a8cf9b:lights_on",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:9892e6896d634518bda09bbca8a8cf9b:windows_open",
+                      "source":  "dataset:9892e6896d634518bda09bbca8a8cf9b",
+                      "target":  "column:9892e6896d634518bda09bbca8a8cf9b:windows_open",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:9892e6896d634518bda09bbca8a8cf9b:fan_speed",
+                      "source":  "dataset:9892e6896d634518bda09bbca8a8cf9b",
+                      "target":  "column:9892e6896d634518bda09bbca8a8cf9b:fan_speed",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:9892e6896d634518bda09bbca8a8cf9b:ac_temp",
+                      "source":  "dataset:9892e6896d634518bda09bbca8a8cf9b",
+                      "target":  "column:9892e6896d634518bda09bbca8a8cf9b:ac_temp",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:6c04547fea2b4f83aede059d2c36e5fa:age",
+                      "source":  "dataset:6c04547fea2b4f83aede059d2c36e5fa",
+                      "target":  "column:6c04547fea2b4f83aede059d2c36e5fa:age",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:6c04547fea2b4f83aede059d2c36e5fa:sex",
+                      "source":  "dataset:6c04547fea2b4f83aede059d2c36e5fa",
+                      "target":  "column:6c04547fea2b4f83aede059d2c36e5fa:sex",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:6c04547fea2b4f83aede059d2c36e5fa:bmi",
+                      "source":  "dataset:6c04547fea2b4f83aede059d2c36e5fa",
+                      "target":  "column:6c04547fea2b4f83aede059d2c36e5fa:bmi",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:6c04547fea2b4f83aede059d2c36e5fa:children",
+                      "source":  "dataset:6c04547fea2b4f83aede059d2c36e5fa",
+                      "target":  "column:6c04547fea2b4f83aede059d2c36e5fa:children",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:6c04547fea2b4f83aede059d2c36e5fa:smoker",
+                      "source":  "dataset:6c04547fea2b4f83aede059d2c36e5fa",
+                      "target":  "column:6c04547fea2b4f83aede059d2c36e5fa:smoker",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:6c04547fea2b4f83aede059d2c36e5fa:region",
+                      "source":  "dataset:6c04547fea2b4f83aede059d2c36e5fa",
+                      "target":  "column:6c04547fea2b4f83aede059d2c36e5fa:region",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:6c04547fea2b4f83aede059d2c36e5fa:charges",
+                      "source":  "dataset:6c04547fea2b4f83aede059d2c36e5fa",
+                      "target":  "column:6c04547fea2b4f83aede059d2c36e5fa:charges",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:e90bac2ffc4248398088dd31b331800a:age",
+                      "source":  "dataset:e90bac2ffc4248398088dd31b331800a",
+                      "target":  "column:e90bac2ffc4248398088dd31b331800a:age",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:e90bac2ffc4248398088dd31b331800a:sex",
+                      "source":  "dataset:e90bac2ffc4248398088dd31b331800a",
+                      "target":  "column:e90bac2ffc4248398088dd31b331800a:sex",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:e90bac2ffc4248398088dd31b331800a:bmi",
+                      "source":  "dataset:e90bac2ffc4248398088dd31b331800a",
+                      "target":  "column:e90bac2ffc4248398088dd31b331800a:bmi",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:e90bac2ffc4248398088dd31b331800a:children",
+                      "source":  "dataset:e90bac2ffc4248398088dd31b331800a",
+                      "target":  "column:e90bac2ffc4248398088dd31b331800a:children",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:e90bac2ffc4248398088dd31b331800a:smoker",
+                      "source":  "dataset:e90bac2ffc4248398088dd31b331800a",
+                      "target":  "column:e90bac2ffc4248398088dd31b331800a:smoker",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:e90bac2ffc4248398088dd31b331800a:region",
+                      "source":  "dataset:e90bac2ffc4248398088dd31b331800a",
+                      "target":  "column:e90bac2ffc4248398088dd31b331800a:region",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:e90bac2ffc4248398088dd31b331800a:charges",
+                      "source":  "dataset:e90bac2ffc4248398088dd31b331800a",
+                      "target":  "column:e90bac2ffc4248398088dd31b331800a:charges",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:4ebb9e4b112f4537a24743efb84cf52f:age",
+                      "source":  "dataset:4ebb9e4b112f4537a24743efb84cf52f",
+                      "target":  "column:4ebb9e4b112f4537a24743efb84cf52f:age",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:4ebb9e4b112f4537a24743efb84cf52f:sex",
+                      "source":  "dataset:4ebb9e4b112f4537a24743efb84cf52f",
+                      "target":  "column:4ebb9e4b112f4537a24743efb84cf52f:sex",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:4ebb9e4b112f4537a24743efb84cf52f:bmi",
+                      "source":  "dataset:4ebb9e4b112f4537a24743efb84cf52f",
+                      "target":  "column:4ebb9e4b112f4537a24743efb84cf52f:bmi",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:4ebb9e4b112f4537a24743efb84cf52f:children",
+                      "source":  "dataset:4ebb9e4b112f4537a24743efb84cf52f",
+                      "target":  "column:4ebb9e4b112f4537a24743efb84cf52f:children",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:4ebb9e4b112f4537a24743efb84cf52f:smoker",
+                      "source":  "dataset:4ebb9e4b112f4537a24743efb84cf52f",
+                      "target":  "column:4ebb9e4b112f4537a24743efb84cf52f:smoker",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:4ebb9e4b112f4537a24743efb84cf52f:region",
+                      "source":  "dataset:4ebb9e4b112f4537a24743efb84cf52f",
+                      "target":  "column:4ebb9e4b112f4537a24743efb84cf52f:region",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:4ebb9e4b112f4537a24743efb84cf52f:charges",
+                      "source":  "dataset:4ebb9e4b112f4537a24743efb84cf52f",
+                      "target":  "column:4ebb9e4b112f4537a24743efb84cf52f:charges",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:5f382aef22e7420188d367d7fade962d:product",
+                      "source":  "dataset:5f382aef22e7420188d367d7fade962d",
+                      "target":  "column:5f382aef22e7420188d367d7fade962d:product",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:5f382aef22e7420188d367d7fade962d:quantity",
+                      "source":  "dataset:5f382aef22e7420188d367d7fade962d",
+                      "target":  "column:5f382aef22e7420188d367d7fade962d:quantity",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:5f382aef22e7420188d367d7fade962d:price",
+                      "source":  "dataset:5f382aef22e7420188d367d7fade962d",
+                      "target":  "column:5f382aef22e7420188d367d7fade962d:price",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:6a4977699fe64bda961a09b0ff1e7d7e:product",
+                      "source":  "dataset:6a4977699fe64bda961a09b0ff1e7d7e",
+                      "target":  "column:6a4977699fe64bda961a09b0ff1e7d7e:product",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:6a4977699fe64bda961a09b0ff1e7d7e:quantity",
+                      "source":  "dataset:6a4977699fe64bda961a09b0ff1e7d7e",
+                      "target":  "column:6a4977699fe64bda961a09b0ff1e7d7e:quantity",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:6a4977699fe64bda961a09b0ff1e7d7e:price",
+                      "source":  "dataset:6a4977699fe64bda961a09b0ff1e7d7e",
+                      "target":  "column:6a4977699fe64bda961a09b0ff1e7d7e:price",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:5020920d05094125ae60a5e485d2d5eb:product",
+                      "source":  "dataset:5020920d05094125ae60a5e485d2d5eb",
+                      "target":  "column:5020920d05094125ae60a5e485d2d5eb:product",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:5020920d05094125ae60a5e485d2d5eb:quantity",
+                      "source":  "dataset:5020920d05094125ae60a5e485d2d5eb",
+                      "target":  "column:5020920d05094125ae60a5e485d2d5eb:quantity",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:5020920d05094125ae60a5e485d2d5eb:price",
+                      "source":  "dataset:5020920d05094125ae60a5e485d2d5eb",
+                      "target":  "column:5020920d05094125ae60a5e485d2d5eb:price",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:f547f7ea665545fc9347ca354f27a76c:product",
+                      "source":  "dataset:f547f7ea665545fc9347ca354f27a76c",
+                      "target":  "column:f547f7ea665545fc9347ca354f27a76c:product",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:f547f7ea665545fc9347ca354f27a76c:quantity",
+                      "source":  "dataset:f547f7ea665545fc9347ca354f27a76c",
+                      "target":  "column:f547f7ea665545fc9347ca354f27a76c:quantity",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:f547f7ea665545fc9347ca354f27a76c:price",
+                      "source":  "dataset:f547f7ea665545fc9347ca354f27a76c",
+                      "target":  "column:f547f7ea665545fc9347ca354f27a76c:price",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:3588e68c267941ee94a4649c4dad07d8:product",
+                      "source":  "dataset:3588e68c267941ee94a4649c4dad07d8",
+                      "target":  "column:3588e68c267941ee94a4649c4dad07d8:product",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:3588e68c267941ee94a4649c4dad07d8:quantity",
+                      "source":  "dataset:3588e68c267941ee94a4649c4dad07d8",
+                      "target":  "column:3588e68c267941ee94a4649c4dad07d8:quantity",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:3588e68c267941ee94a4649c4dad07d8:price",
+                      "source":  "dataset:3588e68c267941ee94a4649c4dad07d8",
+                      "target":  "column:3588e68c267941ee94a4649c4dad07d8:price",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:a261520221e04f7bad98e26bd6ad3aa2:product",
+                      "source":  "dataset:a261520221e04f7bad98e26bd6ad3aa2",
+                      "target":  "column:a261520221e04f7bad98e26bd6ad3aa2:product",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:a261520221e04f7bad98e26bd6ad3aa2:quantity",
+                      "source":  "dataset:a261520221e04f7bad98e26bd6ad3aa2",
+                      "target":  "column:a261520221e04f7bad98e26bd6ad3aa2:quantity",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:a261520221e04f7bad98e26bd6ad3aa2:price",
+                      "source":  "dataset:a261520221e04f7bad98e26bd6ad3aa2",
+                      "target":  "column:a261520221e04f7bad98e26bd6ad3aa2:price",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:56ff8a1d4f8c4d93b5d2b7c9d23d9611:product",
+                      "source":  "dataset:56ff8a1d4f8c4d93b5d2b7c9d23d9611",
+                      "target":  "column:56ff8a1d4f8c4d93b5d2b7c9d23d9611:product",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:56ff8a1d4f8c4d93b5d2b7c9d23d9611:quantity",
+                      "source":  "dataset:56ff8a1d4f8c4d93b5d2b7c9d23d9611",
+                      "target":  "column:56ff8a1d4f8c4d93b5d2b7c9d23d9611:quantity",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:56ff8a1d4f8c4d93b5d2b7c9d23d9611:price",
+                      "source":  "dataset:56ff8a1d4f8c4d93b5d2b7c9d23d9611",
+                      "target":  "column:56ff8a1d4f8c4d93b5d2b7c9d23d9611:price",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:7c7401e8858e404b9d2dc8f1824bd713:product",
+                      "source":  "dataset:7c7401e8858e404b9d2dc8f1824bd713",
+                      "target":  "column:7c7401e8858e404b9d2dc8f1824bd713:product",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:7c7401e8858e404b9d2dc8f1824bd713:quantity",
+                      "source":  "dataset:7c7401e8858e404b9d2dc8f1824bd713",
+                      "target":  "column:7c7401e8858e404b9d2dc8f1824bd713:quantity",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:7c7401e8858e404b9d2dc8f1824bd713:price",
+                      "source":  "dataset:7c7401e8858e404b9d2dc8f1824bd713",
+                      "target":  "column:7c7401e8858e404b9d2dc8f1824bd713:price",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:b39861519414496c85780ca9273ad941:product",
+                      "source":  "dataset:b39861519414496c85780ca9273ad941",
+                      "target":  "column:b39861519414496c85780ca9273ad941:product",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:b39861519414496c85780ca9273ad941:quantity",
+                      "source":  "dataset:b39861519414496c85780ca9273ad941",
+                      "target":  "column:b39861519414496c85780ca9273ad941:quantity",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:b39861519414496c85780ca9273ad941:price",
+                      "source":  "dataset:b39861519414496c85780ca9273ad941",
+                      "target":  "column:b39861519414496c85780ca9273ad941:price",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:5587126695f24db389bb552b737e507a:product",
+                      "source":  "dataset:5587126695f24db389bb552b737e507a",
+                      "target":  "column:5587126695f24db389bb552b737e507a:product",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:5587126695f24db389bb552b737e507a:quantity",
+                      "source":  "dataset:5587126695f24db389bb552b737e507a",
+                      "target":  "column:5587126695f24db389bb552b737e507a:quantity",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:5587126695f24db389bb552b737e507a:price",
+                      "source":  "dataset:5587126695f24db389bb552b737e507a",
+                      "target":  "column:5587126695f24db389bb552b737e507a:price",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:f802a777793f4fca8595cdb769efa684:product",
+                      "source":  "dataset:f802a777793f4fca8595cdb769efa684",
+                      "target":  "column:f802a777793f4fca8595cdb769efa684:product",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:f802a777793f4fca8595cdb769efa684:quantity",
+                      "source":  "dataset:f802a777793f4fca8595cdb769efa684",
+                      "target":  "column:f802a777793f4fca8595cdb769efa684:quantity",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:f802a777793f4fca8595cdb769efa684:price",
+                      "source":  "dataset:f802a777793f4fca8595cdb769efa684",
+                      "target":  "column:f802a777793f4fca8595cdb769efa684:price",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:b8fae548694c479299d1206bfa7bb836:product",
+                      "source":  "dataset:b8fae548694c479299d1206bfa7bb836",
+                      "target":  "column:b8fae548694c479299d1206bfa7bb836:product",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:b8fae548694c479299d1206bfa7bb836:quantity",
+                      "source":  "dataset:b8fae548694c479299d1206bfa7bb836",
+                      "target":  "column:b8fae548694c479299d1206bfa7bb836:quantity",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:b8fae548694c479299d1206bfa7bb836:price",
+                      "source":  "dataset:b8fae548694c479299d1206bfa7bb836",
+                      "target":  "column:b8fae548694c479299d1206bfa7bb836:price",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:f45a67bd8e6740c7b1adef04f2b0ac6f:product",
+                      "source":  "dataset:f45a67bd8e6740c7b1adef04f2b0ac6f",
+                      "target":  "column:f45a67bd8e6740c7b1adef04f2b0ac6f:product",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:f45a67bd8e6740c7b1adef04f2b0ac6f:quantity",
+                      "source":  "dataset:f45a67bd8e6740c7b1adef04f2b0ac6f",
+                      "target":  "column:f45a67bd8e6740c7b1adef04f2b0ac6f:quantity",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:f45a67bd8e6740c7b1adef04f2b0ac6f:price",
+                      "source":  "dataset:f45a67bd8e6740c7b1adef04f2b0ac6f",
+                      "target":  "column:f45a67bd8e6740c7b1adef04f2b0ac6f:price",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:aad94fccb6ec42ad8d1356c9e580c58d:product",
+                      "source":  "dataset:aad94fccb6ec42ad8d1356c9e580c58d",
+                      "target":  "column:aad94fccb6ec42ad8d1356c9e580c58d:product",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:aad94fccb6ec42ad8d1356c9e580c58d:quantity",
+                      "source":  "dataset:aad94fccb6ec42ad8d1356c9e580c58d",
+                      "target":  "column:aad94fccb6ec42ad8d1356c9e580c58d:quantity",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:aad94fccb6ec42ad8d1356c9e580c58d:price",
+                      "source":  "dataset:aad94fccb6ec42ad8d1356c9e580c58d",
+                      "target":  "column:aad94fccb6ec42ad8d1356c9e580c58d:price",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:5f867b8a91e149dfb5acfb3b914dcf6c:product",
+                      "source":  "dataset:5f867b8a91e149dfb5acfb3b914dcf6c",
+                      "target":  "column:5f867b8a91e149dfb5acfb3b914dcf6c:product",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:5f867b8a91e149dfb5acfb3b914dcf6c:quantity",
+                      "source":  "dataset:5f867b8a91e149dfb5acfb3b914dcf6c",
+                      "target":  "column:5f867b8a91e149dfb5acfb3b914dcf6c:quantity",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:5f867b8a91e149dfb5acfb3b914dcf6c:price",
+                      "source":  "dataset:5f867b8a91e149dfb5acfb3b914dcf6c",
+                      "target":  "column:5f867b8a91e149dfb5acfb3b914dcf6c:price",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:681e8f6277454785841950991bb19bd8:age",
+                      "source":  "dataset:681e8f6277454785841950991bb19bd8",
+                      "target":  "column:681e8f6277454785841950991bb19bd8:age",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:681e8f6277454785841950991bb19bd8:sex",
+                      "source":  "dataset:681e8f6277454785841950991bb19bd8",
+                      "target":  "column:681e8f6277454785841950991bb19bd8:sex",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:681e8f6277454785841950991bb19bd8:bmi",
+                      "source":  "dataset:681e8f6277454785841950991bb19bd8",
+                      "target":  "column:681e8f6277454785841950991bb19bd8:bmi",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:681e8f6277454785841950991bb19bd8:children",
+                      "source":  "dataset:681e8f6277454785841950991bb19bd8",
+                      "target":  "column:681e8f6277454785841950991bb19bd8:children",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:681e8f6277454785841950991bb19bd8:smoker",
+                      "source":  "dataset:681e8f6277454785841950991bb19bd8",
+                      "target":  "column:681e8f6277454785841950991bb19bd8:smoker",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:681e8f6277454785841950991bb19bd8:region",
+                      "source":  "dataset:681e8f6277454785841950991bb19bd8",
+                      "target":  "column:681e8f6277454785841950991bb19bd8:region",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:681e8f6277454785841950991bb19bd8:charges",
+                      "source":  "dataset:681e8f6277454785841950991bb19bd8",
+                      "target":  "column:681e8f6277454785841950991bb19bd8:charges",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:8a4c7848b4424b0f9b313e4902fab787:product",
+                      "source":  "dataset:8a4c7848b4424b0f9b313e4902fab787",
+                      "target":  "column:8a4c7848b4424b0f9b313e4902fab787:product",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:8a4c7848b4424b0f9b313e4902fab787:quantity",
+                      "source":  "dataset:8a4c7848b4424b0f9b313e4902fab787",
+                      "target":  "column:8a4c7848b4424b0f9b313e4902fab787:quantity",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:8a4c7848b4424b0f9b313e4902fab787:price",
+                      "source":  "dataset:8a4c7848b4424b0f9b313e4902fab787",
+                      "target":  "column:8a4c7848b4424b0f9b313e4902fab787:price",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:c9329b8aaad74f6cbb5e38f49ca188ba:age",
+                      "source":  "dataset:c9329b8aaad74f6cbb5e38f49ca188ba",
+                      "target":  "column:c9329b8aaad74f6cbb5e38f49ca188ba:age",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:c9329b8aaad74f6cbb5e38f49ca188ba:sex",
+                      "source":  "dataset:c9329b8aaad74f6cbb5e38f49ca188ba",
+                      "target":  "column:c9329b8aaad74f6cbb5e38f49ca188ba:sex",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:c9329b8aaad74f6cbb5e38f49ca188ba:bmi",
+                      "source":  "dataset:c9329b8aaad74f6cbb5e38f49ca188ba",
+                      "target":  "column:c9329b8aaad74f6cbb5e38f49ca188ba:bmi",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:c9329b8aaad74f6cbb5e38f49ca188ba:children",
+                      "source":  "dataset:c9329b8aaad74f6cbb5e38f49ca188ba",
+                      "target":  "column:c9329b8aaad74f6cbb5e38f49ca188ba:children",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:c9329b8aaad74f6cbb5e38f49ca188ba:smoker",
+                      "source":  "dataset:c9329b8aaad74f6cbb5e38f49ca188ba",
+                      "target":  "column:c9329b8aaad74f6cbb5e38f49ca188ba:smoker",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:c9329b8aaad74f6cbb5e38f49ca188ba:region",
+                      "source":  "dataset:c9329b8aaad74f6cbb5e38f49ca188ba",
+                      "target":  "column:c9329b8aaad74f6cbb5e38f49ca188ba:region",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:c9329b8aaad74f6cbb5e38f49ca188ba:charges",
+                      "source":  "dataset:c9329b8aaad74f6cbb5e38f49ca188ba",
+                      "target":  "column:c9329b8aaad74f6cbb5e38f49ca188ba:charges",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:9b6afe36aab140d2bc8c369f78441179:product",
+                      "source":  "dataset:9b6afe36aab140d2bc8c369f78441179",
+                      "target":  "column:9b6afe36aab140d2bc8c369f78441179:product",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:9b6afe36aab140d2bc8c369f78441179:quantity",
+                      "source":  "dataset:9b6afe36aab140d2bc8c369f78441179",
+                      "target":  "column:9b6afe36aab140d2bc8c369f78441179:quantity",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:9b6afe36aab140d2bc8c369f78441179:price",
+                      "source":  "dataset:9b6afe36aab140d2bc8c369f78441179",
+                      "target":  "column:9b6afe36aab140d2bc8c369f78441179:price",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:01ec47fdeb0e4654ae7440606e42d8a7:product",
+                      "source":  "dataset:01ec47fdeb0e4654ae7440606e42d8a7",
+                      "target":  "column:01ec47fdeb0e4654ae7440606e42d8a7:product",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:01ec47fdeb0e4654ae7440606e42d8a7:quantity",
+                      "source":  "dataset:01ec47fdeb0e4654ae7440606e42d8a7",
+                      "target":  "column:01ec47fdeb0e4654ae7440606e42d8a7:quantity",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:01ec47fdeb0e4654ae7440606e42d8a7:price",
+                      "source":  "dataset:01ec47fdeb0e4654ae7440606e42d8a7",
+                      "target":  "column:01ec47fdeb0e4654ae7440606e42d8a7:price",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:436c342d6f524527b35f795377f51932:product",
+                      "source":  "dataset:436c342d6f524527b35f795377f51932",
+                      "target":  "column:436c342d6f524527b35f795377f51932:product",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:436c342d6f524527b35f795377f51932:quantity",
+                      "source":  "dataset:436c342d6f524527b35f795377f51932",
+                      "target":  "column:436c342d6f524527b35f795377f51932:quantity",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:436c342d6f524527b35f795377f51932:price",
+                      "source":  "dataset:436c342d6f524527b35f795377f51932",
+                      "target":  "column:436c342d6f524527b35f795377f51932:price",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:235cdd1781e547a089e06a0552e83da2:product",
+                      "source":  "dataset:235cdd1781e547a089e06a0552e83da2",
+                      "target":  "column:235cdd1781e547a089e06a0552e83da2:product",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:235cdd1781e547a089e06a0552e83da2:quantity",
+                      "source":  "dataset:235cdd1781e547a089e06a0552e83da2",
+                      "target":  "column:235cdd1781e547a089e06a0552e83da2:quantity",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:235cdd1781e547a089e06a0552e83da2:price",
+                      "source":  "dataset:235cdd1781e547a089e06a0552e83da2",
+                      "target":  "column:235cdd1781e547a089e06a0552e83da2:price",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:450c0a926d4f4499adfbe6cdc67504ff:age",
+                      "source":  "dataset:450c0a926d4f4499adfbe6cdc67504ff",
+                      "target":  "column:450c0a926d4f4499adfbe6cdc67504ff:age",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:450c0a926d4f4499adfbe6cdc67504ff:sex",
+                      "source":  "dataset:450c0a926d4f4499adfbe6cdc67504ff",
+                      "target":  "column:450c0a926d4f4499adfbe6cdc67504ff:sex",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:450c0a926d4f4499adfbe6cdc67504ff:bmi",
+                      "source":  "dataset:450c0a926d4f4499adfbe6cdc67504ff",
+                      "target":  "column:450c0a926d4f4499adfbe6cdc67504ff:bmi",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:450c0a926d4f4499adfbe6cdc67504ff:children",
+                      "source":  "dataset:450c0a926d4f4499adfbe6cdc67504ff",
+                      "target":  "column:450c0a926d4f4499adfbe6cdc67504ff:children",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:450c0a926d4f4499adfbe6cdc67504ff:smoker",
+                      "source":  "dataset:450c0a926d4f4499adfbe6cdc67504ff",
+                      "target":  "column:450c0a926d4f4499adfbe6cdc67504ff:smoker",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:450c0a926d4f4499adfbe6cdc67504ff:region",
+                      "source":  "dataset:450c0a926d4f4499adfbe6cdc67504ff",
+                      "target":  "column:450c0a926d4f4499adfbe6cdc67504ff:region",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:450c0a926d4f4499adfbe6cdc67504ff:charges",
+                      "source":  "dataset:450c0a926d4f4499adfbe6cdc67504ff",
+                      "target":  "column:450c0a926d4f4499adfbe6cdc67504ff:charges",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:72a45ebe0f3f45a8a7939485c0f647a6:product",
+                      "source":  "dataset:72a45ebe0f3f45a8a7939485c0f647a6",
+                      "target":  "column:72a45ebe0f3f45a8a7939485c0f647a6:product",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:72a45ebe0f3f45a8a7939485c0f647a6:quantity",
+                      "source":  "dataset:72a45ebe0f3f45a8a7939485c0f647a6",
+                      "target":  "column:72a45ebe0f3f45a8a7939485c0f647a6:quantity",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:72a45ebe0f3f45a8a7939485c0f647a6:price",
+                      "source":  "dataset:72a45ebe0f3f45a8a7939485c0f647a6",
+                      "target":  "column:72a45ebe0f3f45a8a7939485c0f647a6:price",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:daa7fddaee7e473f88775520db355b38:age",
+                      "source":  "dataset:daa7fddaee7e473f88775520db355b38",
+                      "target":  "column:daa7fddaee7e473f88775520db355b38:age",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:daa7fddaee7e473f88775520db355b38:sex",
+                      "source":  "dataset:daa7fddaee7e473f88775520db355b38",
+                      "target":  "column:daa7fddaee7e473f88775520db355b38:sex",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:daa7fddaee7e473f88775520db355b38:bmi",
+                      "source":  "dataset:daa7fddaee7e473f88775520db355b38",
+                      "target":  "column:daa7fddaee7e473f88775520db355b38:bmi",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:daa7fddaee7e473f88775520db355b38:children",
+                      "source":  "dataset:daa7fddaee7e473f88775520db355b38",
+                      "target":  "column:daa7fddaee7e473f88775520db355b38:children",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:daa7fddaee7e473f88775520db355b38:smoker",
+                      "source":  "dataset:daa7fddaee7e473f88775520db355b38",
+                      "target":  "column:daa7fddaee7e473f88775520db355b38:smoker",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:daa7fddaee7e473f88775520db355b38:region",
+                      "source":  "dataset:daa7fddaee7e473f88775520db355b38",
+                      "target":  "column:daa7fddaee7e473f88775520db355b38:region",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:daa7fddaee7e473f88775520db355b38:charges",
+                      "source":  "dataset:daa7fddaee7e473f88775520db355b38",
+                      "target":  "column:daa7fddaee7e473f88775520db355b38:charges",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:776c2bdd3c944bc6be9644c254e76a4e:product",
+                      "source":  "dataset:776c2bdd3c944bc6be9644c254e76a4e",
+                      "target":  "column:776c2bdd3c944bc6be9644c254e76a4e:product",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:776c2bdd3c944bc6be9644c254e76a4e:quantity",
+                      "source":  "dataset:776c2bdd3c944bc6be9644c254e76a4e",
+                      "target":  "column:776c2bdd3c944bc6be9644c254e76a4e:quantity",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:776c2bdd3c944bc6be9644c254e76a4e:price",
+                      "source":  "dataset:776c2bdd3c944bc6be9644c254e76a4e",
+                      "target":  "column:776c2bdd3c944bc6be9644c254e76a4e:price",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:398c32edc78d4cbaa3c482c4287512ca:product",
+                      "source":  "dataset:398c32edc78d4cbaa3c482c4287512ca",
+                      "target":  "column:398c32edc78d4cbaa3c482c4287512ca:product",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:398c32edc78d4cbaa3c482c4287512ca:quantity",
+                      "source":  "dataset:398c32edc78d4cbaa3c482c4287512ca",
+                      "target":  "column:398c32edc78d4cbaa3c482c4287512ca:quantity",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:398c32edc78d4cbaa3c482c4287512ca:price",
+                      "source":  "dataset:398c32edc78d4cbaa3c482c4287512ca",
+                      "target":  "column:398c32edc78d4cbaa3c482c4287512ca:price",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:0bc87e499ab647498e4119d76db4049c:product",
+                      "source":  "dataset:0bc87e499ab647498e4119d76db4049c",
+                      "target":  "column:0bc87e499ab647498e4119d76db4049c:product",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:0bc87e499ab647498e4119d76db4049c:quantity",
+                      "source":  "dataset:0bc87e499ab647498e4119d76db4049c",
+                      "target":  "column:0bc87e499ab647498e4119d76db4049c:quantity",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:0bc87e499ab647498e4119d76db4049c:price",
+                      "source":  "dataset:0bc87e499ab647498e4119d76db4049c",
+                      "target":  "column:0bc87e499ab647498e4119d76db4049c:price",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:5a45cd450cdd476bb672582407f252e8:age",
+                      "source":  "dataset:5a45cd450cdd476bb672582407f252e8",
+                      "target":  "column:5a45cd450cdd476bb672582407f252e8:age",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:5a45cd450cdd476bb672582407f252e8:sex",
+                      "source":  "dataset:5a45cd450cdd476bb672582407f252e8",
+                      "target":  "column:5a45cd450cdd476bb672582407f252e8:sex",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:5a45cd450cdd476bb672582407f252e8:bmi",
+                      "source":  "dataset:5a45cd450cdd476bb672582407f252e8",
+                      "target":  "column:5a45cd450cdd476bb672582407f252e8:bmi",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:5a45cd450cdd476bb672582407f252e8:children",
+                      "source":  "dataset:5a45cd450cdd476bb672582407f252e8",
+                      "target":  "column:5a45cd450cdd476bb672582407f252e8:children",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:5a45cd450cdd476bb672582407f252e8:smoker",
+                      "source":  "dataset:5a45cd450cdd476bb672582407f252e8",
+                      "target":  "column:5a45cd450cdd476bb672582407f252e8:smoker",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:5a45cd450cdd476bb672582407f252e8:region",
+                      "source":  "dataset:5a45cd450cdd476bb672582407f252e8",
+                      "target":  "column:5a45cd450cdd476bb672582407f252e8:region",
+                      "type":  "HAS_COLUMN"
+                  },
+                  {
+                      "id":  "contains:5a45cd450cdd476bb672582407f252e8:charges",
+                      "source":  "dataset:5a45cd450cdd476bb672582407f252e8",
+                      "target":  "column:5a45cd450cdd476bb672582407f252e8:charges",
+                      "type":  "HAS_COLUMN"
+                  }
+              ],
+    "returned_node_count":  169,
+    "returned_edge_count":  136
+}

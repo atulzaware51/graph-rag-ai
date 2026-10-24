@@ -1,0 +1,123 @@
+
+const API_BASE_URL = ''
+
+async function request(endpoint, options = {}) {
+  let response
+
+  try {
+    response = await fetch(`${API_BASE_URL}${endpoint}`, options)
+  } catch {
+    throw new Error(
+      'Cannot connect to the API. Check that FastAPI is running on port 8000.',
+    )
+  }
+
+  const contentType = response.headers.get('content-type') || ''
+
+  const data = contentType.includes('application/json')
+    ? await response.json()
+    : await response.text()
+
+  if (!response.ok) {
+    const detail =
+      typeof data === 'object' && data !== null
+        ? data.detail || data.message
+        : data
+
+    throw new Error(
+      detail ? String(detail) : `Request failed: ${response.status}`,
+    )
+  }
+
+  return data
+}
+
+export function checkHealth() {
+  return request('/health')
+}
+
+export async function getDatasets() {
+  const data = await request('/datasets/')
+
+  if (!Array.isArray(data.datasets)) {
+    throw new Error('Unexpected response from the datasets API.')
+  }
+
+  return data.datasets
+}
+
+export function getDatasetSchema(datasetId) {
+  return request(`/datasets/${encodeURIComponent(datasetId)}/schema`)
+}
+
+export function getDatasetPreview(datasetId) {
+  return request(`/datasets/${encodeURIComponent(datasetId)}/preview`)
+}
+
+export function askDataset(datasetId, query, topK = 5) {
+  return request(`/datasets/${encodeURIComponent(datasetId)}/ask`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query, top_k: topK }),
+  })
+}
+
+export function askDatasetSQL(datasetId, question) {
+  return request(`/datasets/${encodeURIComponent(datasetId)}/ask-sql`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ question }),
+  })
+}
+
+export function uploadDataset(file, onProgress) {
+  const formData = new FormData()
+  formData.append('file', file)
+
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+
+    xhr.open('POST', '/documents/upload')
+
+    xhr.upload.addEventListener('progress', (event) => {
+      if (event.lengthComputable && typeof onProgress === 'function') {
+        onProgress(Math.round((event.loaded / event.total) * 100))
+      }
+    })
+
+    xhr.addEventListener('load', () => {
+      let data
+
+      try {
+        data = JSON.parse(xhr.responseText)
+      } catch {
+        reject(new Error('The server returned an invalid response.'))
+        return
+      }
+
+      if (xhr.status < 200 || xhr.status >= 300) {
+        reject(
+          new Error(
+            typeof data.detail === 'string'
+              ? data.detail
+              : `Upload failed: HTTP ${xhr.status}`,
+          ),
+        )
+        return
+      }
+
+      resolve(data)
+    })
+
+    xhr.addEventListener('error', () => {
+      reject(new Error('Cannot connect to the API. Check that FastAPI is running.'))
+    })
+
+    xhr.addEventListener('abort', () => {
+      reject(new Error('The upload was cancelled.'))
+    })
+
+    xhr.send(formData)
+  })
+}
+// npm run build

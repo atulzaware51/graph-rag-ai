@@ -1,0 +1,179 @@
+
+"""API tests for the LangGraph Text-to-SQL endpoint."""
+
+from fastapi.testclient import TestClient
+
+from backend.app.main import app
+from backend.app.api import datasets as datasets_api
+
+
+client = TestClient(app)
+
+VALID_DATASET_ID = "a" * 32
+
+
+def test_ask_sql_success(monkeypatch):
+    """A valid request returns SQL and its results."""
+
+    expected_response = {
+        "status": "success",
+        "dataset_id": VALID_DATASET_ID,
+        "question": "Calculate total revenue",
+        "sql": "SELECT SUM(quantity * price) AS total_revenue",
+        "result": {
+            "status": "success",
+            "columns": ["total_revenue"],
+            "row_count": 1,
+            "rows": [{"total_revenue": 102500}],
+        },
+    }
+
+    def fake_ask_with_sql_graph(question, dataset_id):
+        assert question == "Calculate total revenue"
+        assert dataset_id == VALID_DATASET_ID
+
+        return {
+            "status": "success",
+            "result": expected_response,
+        }
+
+    monkeypatch.setattr(
+        datasets_api,
+        "ask_with_sql_graph",
+        fake_ask_with_sql_graph,
+    )
+
+    response = client.post(
+        f"/datasets/{VALID_DATASET_ID}/ask-sql",
+        json={"question": "Calculate total revenue"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "success"
+    assert body["dataset_id"] == VALID_DATASET_ID
+    assert body["result"]["rows"][0]["total_revenue"] == 102500
+
+
+def test_ask_sql_empty_question():
+    """An empty question is rejected by request validation."""
+
+    response = client.post(
+        f"/datasets/{VALID_DATASET_ID}/ask-sql",
+        json={"question": ""},
+    )
+
+    assert response.status_code == 422
+
+
+def test_ask_sql_missing_question():
+    """A request without the required question is rejected."""
+
+    response = client.post(
+        f"/datasets/{VALID_DATASET_ID}/ask-sql",
+        json={},
+    )
+
+    assert response.status_code == 422
+
+
+def test_ask_sql_unknown_dataset(monkeypatch):
+    """An unknown dataset returns HTTP 404."""
+
+    def fake_ask_with_sql_graph(question, dataset_id):
+        return {
+            "status": "error",
+            "error": "Dataset not found.",
+        }
+
+    monkeypatch.setattr(
+        datasets_api,
+        "ask_with_sql_graph",
+        fake_ask_with_sql_graph,
+    )
+
+    response = client.post(
+        f"/datasets/{VALID_DATASET_ID}/ask-sql",
+        json={"question": "Count rows"},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Dataset not found."
+
+
+def test_ask_sql_rejected_query(monkeypatch):
+    """Rejected generated SQL returns an upstream/service error."""
+
+    error_message = (
+        "Generated SQL was rejected: write statements are prohibited."
+    )
+
+    def fake_ask_with_sql_graph(question, dataset_id):
+        return {
+            "status": "error",
+            "error": error_message,
+        }
+
+    monkeypatch.setattr(
+        datasets_api,
+        "ask_with_sql_graph",
+        fake_ask_with_sql_graph,
+    )
+
+    response = client.post(
+        f"/datasets/{VALID_DATASET_ID}/ask-sql",
+        json={"question": "Delete all rows"},
+    )
+
+    assert response.status_code == 502
+    assert "rejected" in response.json()["detail"].lower()
+
+
+
+def test_ask_sql_missing_gemini_configuration(monkeypatch):
+    """Missing Gemini configuration returns a server error."""
+
+    def fake_ask_with_sql_graph(question, dataset_id):
+        return {
+            "status": "error",
+            "error": "GEMINI_API_KEY is not configured.",
+        }
+
+    monkeypatch.setattr(
+        datasets_api,
+        "ask_with_sql_graph",
+        fake_ask_with_sql_graph,
+    )
+
+    response = client.post(
+        f"/datasets/{VALID_DATASET_ID}/ask-sql",
+        json={"question": "Count rows"},
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == (
+        "Text-to-SQL service is not configured."
+    )
+
+
+def test_ask_sql_malformed_workflow_response(monkeypatch):
+    """An invalid success response returns HTTP 500."""
+
+    def fake_ask_with_sql_graph(question, dataset_id):
+        return {"status": "success"}
+
+    monkeypatch.setattr(
+        datasets_api,
+        "ask_with_sql_graph",
+        fake_ask_with_sql_graph,
+    )
+
+    response = client.post(
+        f"/datasets/{VALID_DATASET_ID}/ask-sql",
+        json={"question": "Count rows"},
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == (
+        "Invalid response from the Text-to-SQL workflow."
+    )
