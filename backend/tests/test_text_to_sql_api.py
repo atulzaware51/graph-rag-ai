@@ -2,6 +2,7 @@
 """API tests for the LangGraph Text-to-SQL endpoint."""
 
 from fastapi.testclient import TestClient
+import pytest
 
 from backend.app.main import app
 from backend.app.api import datasets as datasets_api
@@ -10,6 +11,15 @@ from backend.app.api import datasets as datasets_api
 client = TestClient(app)
 
 VALID_DATASET_ID = "a" * 32
+
+
+@pytest.fixture(autouse=True)
+def fake_selected_graph(monkeypatch):
+    monkeypatch.setattr(
+        datasets_api,
+        "build_graph_for_scope",
+        lambda *_args, **_kwargs: {"nodes": [], "edges": []},
+    )
 
 
 def test_ask_sql_success(monkeypatch):
@@ -28,9 +38,10 @@ def test_ask_sql_success(monkeypatch):
         },
     }
 
-    def fake_ask_with_sql_graph(question, dataset_id):
+    def fake_ask_with_sql_graph(question, dataset_id, graph_context=None):
         assert question == "Calculate total revenue"
         assert dataset_id == VALID_DATASET_ID
+        assert graph_context == {"nodes": [], "edges": []}
 
         return {
             "status": "success",
@@ -80,7 +91,7 @@ def test_ask_sql_missing_question():
 def test_ask_sql_unknown_dataset(monkeypatch):
     """An unknown dataset returns HTTP 404."""
 
-    def fake_ask_with_sql_graph(question, dataset_id):
+    def fake_ask_with_sql_graph(question, dataset_id, graph_context=None):
         return {
             "status": "error",
             "error": "Dataset not found.",
@@ -108,7 +119,7 @@ def test_ask_sql_rejected_query(monkeypatch):
         "Generated SQL was rejected: write statements are prohibited."
     )
 
-    def fake_ask_with_sql_graph(question, dataset_id):
+    def fake_ask_with_sql_graph(question, dataset_id, graph_context=None):
         return {
             "status": "error",
             "error": error_message,
@@ -133,7 +144,7 @@ def test_ask_sql_rejected_query(monkeypatch):
 def test_ask_sql_missing_gemini_configuration(monkeypatch):
     """Missing Gemini configuration returns a server error."""
 
-    def fake_ask_with_sql_graph(question, dataset_id):
+    def fake_ask_with_sql_graph(question, dataset_id, graph_context=None):
         return {
             "status": "error",
             "error": "GEMINI_API_KEY is not configured.",
@@ -159,7 +170,7 @@ def test_ask_sql_missing_gemini_configuration(monkeypatch):
 def test_ask_sql_malformed_workflow_response(monkeypatch):
     """An invalid success response returns HTTP 500."""
 
-    def fake_ask_with_sql_graph(question, dataset_id):
+    def fake_ask_with_sql_graph(question, dataset_id, graph_context=None):
         return {"status": "success"}
 
     monkeypatch.setattr(

@@ -118,6 +118,15 @@ def test_empty_question_is_rejected():
         service.ask_with_sql("", "a" * 32)
 
 
+@pytest.mark.parametrize("dataset_ids", [[], ["a" * 32, ""], "a" * 32])
+def test_invalid_dataset_id_lists_are_rejected(dataset_ids):
+    with pytest.raises(ValueError, match="dataset"):
+        service.ask_with_sql(
+            "Count rows",
+            dataset_ids=dataset_ids,
+        )
+
+
 def test_missing_api_key_is_rejected(test_database, monkeypatch):
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
 
@@ -144,4 +153,139 @@ def test_generated_write_query_is_rejected(
         service.ask_with_sql(
             "Delete all rows",
             "a" * 32,
+        )
+
+
+def test_ask_with_sql_uses_selected_tables_and_graph_context(
+    test_database,
+    monkeypatch,
+):
+    first_id = "a" * 32
+    second_id = "b" * 32
+    unselected_id = "e" * 32
+    first_table = f"dataset_{first_id}"
+    second_table = f"dataset_{second_id}"
+    unselected_table = f"dataset_{unselected_id}"
+    with sqlite3.connect(test_database) as connection:
+        connection.execute(
+            f'CREATE TABLE "{second_table}" (quantity INTEGER)'
+        )
+        connection.execute(
+            f'INSERT INTO "{second_table}" VALUES (3)'
+        )
+        connection.execute(
+            "INSERT INTO datasets VALUES (?, ?)",
+            (second_id, second_table),
+        )
+        connection.execute(
+            f'CREATE TABLE "{unselected_table}" (quantity INTEGER)'
+        )
+        connection.execute(
+            f'INSERT INTO "{unselected_table}" VALUES (999)'
+        )
+        connection.execute(
+            "INSERT INTO datasets VALUES (?, ?)",
+            (unselected_id, unselected_table),
+        )
+
+    monkeypatch.setattr(
+        service,
+        "get_dataset_details",
+        lambda dataset_id: {
+            "dataset_id": dataset_id,
+            "table_name": (
+                first_table if dataset_id == first_id else second_table
+            ),
+            "original_filename": f"{dataset_id[:1]}.csv",
+        },
+    )
+    sql = (
+        f'SELECT SUM(quantity) AS total FROM "{first_table}" '
+        f'UNION ALL SELECT SUM(quantity) FROM "{second_table}"'
+    )
+    mock_langchain(monkeypatch, sql)
+
+    class GraphCheckingLLM:
+        def __init__(self, **kwargs):
+            pass
+
+        def invoke(self, messages):
+            assert first_table in messages[0].content
+            assert second_table in messages[0].content
+            assert '"status":"candidate"' in messages[0].content
+            assert '"matched_relationships"' in messages[0].content
+            assert unselected_id not in messages[0].content
+            assert "private-sample-value" not in messages[0].content
+            return type("Response", (), {"content": sql})()
+
+    monkeypatch.setattr(service, "ChatGoogleGenerativeAI", GraphCheckingLLM)
+    result = service.ask_with_sql(
+        "Compare total quantities",
+        dataset_ids=[first_id, second_id],
+        graph_context={
+            "nodes": [
+                {
+                    "id": f"column:{first_id}:quantity",
+                    "type": "Column",
+                    "dataset_id": first_id,
+                    "label": "quantities",
+                    "sql_name": "quantity",
+                    "sample_values": ["private-sample-value"],
+                },
+                {
+                    "id": f"column:{second_id}:quantity",
+                    "type": "Column",
+                    "dataset_id": second_id,
+                    "label": "quantity",
+                    "sql_name": "quantity",
+                },
+                {
+                    "id": f"column:{unselected_id}:quantity",
+                    "type": "Column",
+                    "dataset_id": unselected_id,
+                    "label": "quantity",
+                    "sql_name": "quantity",
+                },
+            ],
+            "candidate_relationships": [
+                {
+                    "left": {
+                        "dataset_id": first_id,
+                        "column": "quantity",
+                    },
+                    "right": {
+                        "dataset_id": second_id,
+                        "column": "quantity",
+                    },
+                    "status": "candidate",
+                    "confidence": 0.9,
+                },
+                {
+                    "left": {
+                        "dataset_id": first_id,
+                        "column": "quantity",
+                    },
+                    "right": {
+                        "dataset_id": unselected_id,
+                        "column": "quantity",
+                    },
+                    "status": "candidate",
+                    "confidence": 1.0,
+                },
+            ],
+        },
+    )
+
+    assert result["dataset_ids"] == [first_id, second_id]
+    assert result["result"]["rows"] == [{"total": 7}, {"total": 3}]
+    assert len(result["graph_guidance"]["matched_relationships"]) == 1
+
+    mock_langchain(
+        monkeypatch,
+        f'SELECT quantity FROM "{unselected_table}"',
+    )
+    with pytest.raises(service.TextToSQLError, match="rejected"):
+        service.ask_with_sql(
+            "Read an unselected table",
+            dataset_ids=[first_id],
         )

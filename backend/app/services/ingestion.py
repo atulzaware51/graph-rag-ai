@@ -3,11 +3,13 @@ from pathlib import Path
 # Import Any for general typing support
 from typing import Any
 import csv
+import struct
 import zipfile
 from xml.etree.ElementTree import ParseError as XMLParseError
 
 # Import pandas library for tabular data manipulation and spreadsheet parsing
 import pandas as pd
+import xlrd
 from openpyxl import load_workbook
 from openpyxl.utils.exceptions import InvalidFileException
 
@@ -19,7 +21,7 @@ from backend.app.services.chunking import (
 
 
 # Define set of allowed spreadsheet file extensions
-SUPPORTED_EXTENSIONS = {".csv", ".xlsx"}
+SUPPORTED_EXTENSIONS = {".csv", ".xls", ".xlsx"}
 # Define maximum allowed file size limit in bytes (10 Megabytes)
 MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB
 MAX_XLSX_UNCOMPRESSED_BYTES = 50 * 1024 * 1024
@@ -59,6 +61,39 @@ def _validate_file_and_headers(path: Path, extension: str) -> None:
             raise IngestionError(
                 "Could not parse the CSV file. Check its encoding and format."
             ) from exc
+    elif extension == ".xls":
+        workbook = None
+        try:
+            workbook = xlrd.open_workbook(
+                str(path),
+                on_demand=True,
+            )
+            worksheet = workbook.sheet_by_index(0)
+            if worksheet.nrows > MAX_SPREADSHEET_ROWS + 1:
+                raise IngestionError(
+                    "The spreadsheet exceeds the supported row limit."
+                )
+            if worksheet.ncols > MAX_SPREADSHEET_COLUMNS:
+                raise IngestionError(
+                    "The spreadsheet exceeds the supported column limit."
+                )
+            headers = worksheet.row_values(0) if worksheet.nrows else None
+        except IngestionError:
+            raise
+        except (
+            OSError,
+            ValueError,
+            TypeError,
+            IndexError,
+            struct.error,
+            xlrd.XLRDError,
+        ) as exc:
+            raise IngestionError(
+                "Could not parse the XLS file. Check its format and headers."
+            ) from exc
+        finally:
+            if workbook is not None:
+                workbook.release_resources()
     else:
         try:
             with zipfile.ZipFile(path) as archive:
@@ -160,7 +195,7 @@ def inspect_spreadsheet(
     # Check if file extension is present in the supported extensions set
     if extension not in SUPPORTED_EXTENSIONS:
         raise IngestionError(
-            "Unsupported file type. Upload a .csv or .xlsx file."
+            "Unsupported file type. Upload a .csv, .xls, or .xlsx file."
         )
 
     # Verify that the target path exists and points to a regular file
@@ -184,7 +219,9 @@ def inspect_spreadsheet(
         # Read CSV file using pandas default engine
         if extension == ".csv":
             dataframe = pd.read_csv(path)
-        # Read Excel spreadsheet using openpyxl engine
+        # Read Excel spreadsheets with the engine that matches their format.
+        elif extension == ".xls":
+            dataframe = pd.read_excel(path, engine="xlrd")
         else:
             dataframe = pd.read_excel(path, engine="openpyxl")
     except (
@@ -196,6 +233,8 @@ def inspect_spreadsheet(
         IndexError,
         TypeError,
         AttributeError,
+        struct.error,
+        xlrd.XLRDError,
         InvalidFileException,
         XMLParseError,
         zipfile.BadZipFile,

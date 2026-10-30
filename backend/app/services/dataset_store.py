@@ -17,10 +17,13 @@ from typing import Any
 
 # Import pandas library for tabular data reading and manipulation
 import pandas as pd
+import xlrd
+
+from backend.app.services.neo4j_store import Neo4jStoreError
 
 
 # Define set of acceptable/supported file extensions for dataset storage
-SUPPORTED_EXTENSIONS = {".csv", ".xlsx"}
+SUPPORTED_EXTENSIONS = {".csv", ".xls", ".xlsx"}
 
 
 # Custom exception class inheriting from Exception to handle dataset storage errors safely
@@ -33,6 +36,9 @@ def _read_dataframe(file_path: Path, extension: str) -> pd.DataFrame:
     # Read CSV file using standard pandas read_csv method
     if extension == ".csv":
         return pd.read_csv(file_path)
+
+    if extension == ".xls":
+        return pd.read_excel(file_path, engine="xlrd")
 
     # Read Excel file using pandas read_excel with openpyxl engine
     return pd.read_excel(file_path, engine="openpyxl")
@@ -183,7 +189,7 @@ def store_spreadsheet(
     # Reject unsupported file extension types
     if extension not in SUPPORTED_EXTENSIONS:
         raise DatasetStorageError(
-            "Unsupported file type. Upload a .csv or .xlsx file."
+            "Unsupported file type. Upload a .csv, .xls, or .xlsx file."
         )
 
     # Ensure source file exists on disk and is a standard file
@@ -475,3 +481,209 @@ def get_dataset_details(
         raise DatasetStorageError(
             f"Could not retrieve dataset details: {exc}"
         ) from exc
+
+
+def delete_spreadsheet(
+    dataset_id: str,
+    database_path: str | Path = "data/graphsheet.db",
+) -> bool:
+    """Delete a dataset after its configured Neo4j scopes are cleared."""
+
+    if (
+        not isinstance(dataset_id, str)
+        or len(dataset_id) != 32
+        or any(character not in "0123456789abcdef" for character in dataset_id)
+    ):
+        raise ValueError("Dataset ID is invalid.")
+
+    database = Path(database_path)
+    if not database.is_file():
+        return False
+
+    try:
+        with sqlite3.connect(database) as connection:
+            connection.row_factory = sqlite3.Row
+            dataset = connection.execute(
+                "SELECT table_name FROM datasets WHERE dataset_id = ?",
+                (dataset_id,),
+            ).fetchone()
+            if dataset is None:
+                return False
+            if dataset["table_name"] != f"dataset_{dataset_id}":
+                raise DatasetStorageError("Stored dataset metadata is invalid.")
+            existing_tables = {
+                row["name"]
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                )
+            }
+            conversation_ids = _dataset_conversation_ids(
+                connection,
+                existing_tables,
+                dataset_id,
+            )
+            remaining_dataset_ids = [
+                row["dataset_id"]
+                for row in connection.execute(
+                    "SELECT dataset_id FROM datasets WHERE dataset_id != ?",
+                    (dataset_id,),
+                )
+            ]
+
+        from backend.app.services.neo4j_store import (
+            delete_graphs,
+            is_configured,
+            sync_graph,
+        )
+
+        if is_configured():
+            from backend.app.services.graph_service import (
+                build_graph_from_database,
+            )
+
+            replacement_graph = build_graph_from_database(
+                database,
+                dataset_ids=remaining_dataset_ids,
+            )
+            graph_scopes = [
+                scope
+                for conversation_id in conversation_ids
+                for scope in (
+                    conversation_id,
+                    f"chat-schema:{conversation_id}",
+                )
+            ]
+            graph_scopes.append(f"dataset-query:{dataset_id}")
+            delete_graphs(graph_scopes)
+            sync_graph("dataset-schema", replacement_graph)
+
+        with sqlite3.connect(database) as connection:
+            connection.execute("PRAGMA foreign_keys = ON")
+            connection.execute("BEGIN IMMEDIATE")
+            connection.row_factory = sqlite3.Row
+
+            dataset = connection.execute(
+                """
+                SELECT table_name
+                FROM datasets
+                WHERE dataset_id = ?
+                """,
+                (dataset_id,),
+            ).fetchone()
+
+            if dataset is None:
+                return False
+
+            table_name = dataset["table_name"]
+            if table_name != f"dataset_{dataset_id}":
+                raise DatasetStorageError(
+                    "Stored dataset metadata is invalid."
+                )
+
+            current_tables = {
+                row["name"]
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                )
+            }
+            current_conversation_ids = _dataset_conversation_ids(
+                connection,
+                current_tables,
+                dataset_id,
+            )
+            if current_conversation_ids != conversation_ids:
+                raise DatasetStorageError(
+                    "Dataset conversation references changed during deletion. "
+                    "Retry the operation."
+                )
+
+            for conversation_id in conversation_ids:
+                if "conversation_events" in current_tables:
+                    connection.execute(
+                        """
+                        DELETE FROM conversation_events
+                        WHERE conversation_id = ?
+                        """,
+                        (conversation_id,),
+                    )
+                if "conversations" in current_tables:
+                    connection.execute(
+                        """
+                        DELETE FROM conversations
+                        WHERE conversation_id = ?
+                        """,
+                        (conversation_id,),
+                    )
+
+            quoted_table = '"' + table_name.replace('"', '""') + '"'
+            connection.execute(f"DROP TABLE IF EXISTS {quoted_table}")
+            if "document_chunks" in current_tables:
+                connection.execute(
+                    "DELETE FROM document_chunks WHERE dataset_id = ?",
+                    (dataset_id,),
+                )
+            if "dataset_columns" in current_tables:
+                connection.execute(
+                    "DELETE FROM dataset_columns WHERE dataset_id = ?",
+                    (dataset_id,),
+                )
+            connection.execute(
+                "DELETE FROM datasets WHERE dataset_id = ?",
+                (dataset_id,),
+            )
+
+        return True
+    except (sqlite3.Error, json.JSONDecodeError) as exc:
+        raise DatasetStorageError(
+            "Could not delete the dataset and its associated data."
+        ) from exc
+    except Neo4jStoreError:
+        raise
+
+
+def _dataset_conversation_ids(
+    connection: sqlite3.Connection,
+    existing_tables: set[str],
+    dataset_id: str,
+) -> set[str]:
+    """Find every conversation whose persisted state references a dataset."""
+    conversation_ids: set[str] = set()
+    if "conversations" in existing_tables:
+        conversation_columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(conversations)")
+        }
+        if "selected_dataset_ids" in conversation_columns:
+            for row in connection.execute(
+                """
+                SELECT conversation_id, dataset_id, selected_dataset_ids
+                FROM conversations
+                """
+            ):
+                selected_ids = json.loads(row["selected_dataset_ids"] or "[]")
+                if row["dataset_id"] == dataset_id or dataset_id in selected_ids:
+                    conversation_ids.add(row["conversation_id"])
+        else:
+            conversation_ids.update(
+                row["conversation_id"]
+                for row in connection.execute(
+                    "SELECT conversation_id FROM conversations WHERE dataset_id = ?",
+                    (dataset_id,),
+                )
+            )
+
+    if "conversation_events" in existing_tables:
+        for event in connection.execute(
+            """
+            SELECT conversation_id, metadata_json
+            FROM conversation_events
+            WHERE metadata_json IS NOT NULL
+            """
+        ):
+            metadata = json.loads(event["metadata_json"])
+            if isinstance(metadata, dict) and (
+                metadata.get("dataset_id") == dataset_id
+                or dataset_id in metadata.get("dataset_ids", [])
+            ):
+                conversation_ids.add(event["conversation_id"])
+    return conversation_ids

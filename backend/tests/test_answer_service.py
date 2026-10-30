@@ -116,6 +116,98 @@ def test_answer_question_handles_gemini_failure(monkeypatch):
         )
 
 
+def test_chat_answer_passes_selected_evidence_graph_and_history(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setenv("GEMINI_MODEL", "test-model")
+    selected_ids = ["sheet-a", "sheet-b"]
+    retrieved_ids = []
+
+    def retrieve(**kwargs):
+        retrieved_ids.extend(kwargs["dataset_ids"])
+        assert "retrieval" in kwargs["graph_context"]
+        return [
+            {
+                **sample_chunks()[0],
+                "dataset_id": "sheet-b",
+                "graph_matches": [
+                    {
+                        "column": "revenue",
+                        "sql_name": "revenue",
+                        "matched_terms": ["revenue"],
+                    }
+                ],
+            }
+        ]
+
+    monkeypatch.setattr(answer_service, "retrieve_chunks_for_datasets", retrieve)
+
+    class FakeResponse:
+        text = "Revenue is supported by the second sheet."
+
+    class FakeModels:
+        def generate_content(self, **kwargs):
+            prompt = kwargs["contents"]
+            assert '"relationship":"candidate"' in prompt
+            assert '"content":"Earlier question"' in prompt
+            assert "Dataset ID: sheet-b" in prompt
+            assert "private-sample-value" not in prompt
+            assert "unretrieved-secret" not in prompt
+            return FakeResponse()
+
+    class FakeClient:
+        def __init__(self, api_key):
+            self.models = FakeModels()
+
+    monkeypatch.setattr(answer_service.genai, "Client", FakeClient)
+
+    result = answer_service.answer_question(
+        query="Compare revenue",
+        dataset_ids=selected_ids,
+        graph_context={
+            "relationship": "candidate",
+            "nodes": [
+                {
+                    "id": "column:sheet-b:revenue",
+                    "type": "Column",
+                    "dataset_id": "sheet-b",
+                    "label": "Revenue",
+                    "sql_name": "revenue",
+                    "sample_values": ["private-sample-value"],
+                },
+                {
+                    "id": "evidence:sheet-b:other",
+                    "type": "Evidence",
+                    "dataset_id": "sheet-b",
+                    "chunk_id": "other",
+                    "chunk_index": 1,
+                    "text": "unretrieved-secret",
+                },
+            ],
+        },
+        conversation_history=[
+            {"role": "user", "content": "Earlier question"}
+        ],
+    )
+
+    assert retrieved_ids == selected_ids
+    assert result["dataset_ids"] == selected_ids
+    assert result["sources"][0]["dataset_id"] == "sheet-b"
+    assert result["sources"][0]["graph_matches"][0]["sql_name"] == "revenue"
+    assert result["graph_retrieval"]["matched_columns"][0]["sql_name"] == (
+        "revenue"
+    )
+    assert "sample_values" not in result["graph_retrieval"]["matched_columns"][0]
+
+
+@pytest.mark.parametrize("dataset_ids", [[], ["sheet-a", ""], "sheet-a"])
+def test_answer_question_rejects_invalid_dataset_id_lists(dataset_ids):
+    with pytest.raises(ValueError, match="dataset"):
+        answer_service.answer_question(
+            query="What is the answer?",
+            dataset_ids=dataset_ids,
+        )
+
+
 @pytest.mark.parametrize(
     ("query", "dataset_id"),
     [

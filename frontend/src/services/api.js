@@ -56,6 +56,155 @@ export async function getDatasets() {
   return data.datasets
 }
 
+export async function getConversations() {
+  const data = await request('/conversations/')
+  if (!data || !Array.isArray(data.conversations)) {
+    throw new Error('Unexpected response from the conversations API.')
+  }
+  return data.conversations
+}
+
+export async function getConversation(conversationId) {
+  const data = await request(
+    `/conversations/${encodeURIComponent(conversationId)}`,
+  )
+  if (!data?.conversation || !Array.isArray(data.conversation.events)) {
+    throw new Error('Unexpected response from the conversation API.')
+  }
+  return data.conversation
+}
+
+export async function createConversation(title = 'New chat', conversationId) {
+  const data = await request('/conversations/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      title,
+      ...(conversationId ? { conversation_id: conversationId } : {}),
+    }),
+  })
+  if (!data?.conversation?.conversation_id) {
+    throw new Error('The server did not return a conversation ID.')
+  }
+  return data.conversation
+}
+
+export function deleteConversation(conversationId) {
+  return request(
+    `/conversations/${encodeURIComponent(conversationId)}`,
+    { method: 'DELETE' },
+  )
+}
+
+export function addConversationMessage(conversationId, actor, message, metadata = {}) {
+  return request(
+    `/conversations/${encodeURIComponent(conversationId)}/messages`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ actor, message, metadata }),
+    },
+  )
+}
+
+export function addConversationEvent(conversationId, eventType, message, metadata = {}) {
+  return request(
+    `/conversations/${encodeURIComponent(conversationId)}/events`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        event_type: eventType,
+        message,
+        metadata,
+      }),
+    },
+  )
+}
+
+export async function getConversationGraph(conversationId) {
+  const data = await request(
+    `/conversations/${encodeURIComponent(conversationId)}/graph`,
+  )
+  if (
+    !data?.graph ||
+    !Array.isArray(data.graph.nodes) ||
+    !Array.isArray(data.graph.edges)
+  ) {
+    throw new Error('Unexpected response from the conversation graph API.')
+  }
+  return {
+    ...data.graph,
+    nodes: data.graph.nodes.map((node) => ({
+      ...node,
+      type: node.type === 'SQLQuery'
+        ? 'Query'
+        : node.type === 'QueryResult'
+          ? 'Result'
+          : node.type,
+      uploaded_at: node.type === 'Upload' ? node.created_at : undefined,
+      executed_at: node.type === 'SQLQuery' ? node.created_at : undefined,
+    })),
+  }
+}
+
+export function updateConversationDatasets(conversationId, datasetIds) {
+  return request(
+    `/conversations/${encodeURIComponent(conversationId)}/datasets`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dataset_ids: datasetIds }),
+    },
+  )
+}
+
+export function askConversation(conversationId, query, topK = 5) {
+  if (!conversationId) {
+    throw new Error('Create a chat before asking a question.')
+  }
+  if (!query || !query.trim()) {
+    throw new Error('Enter a question before submitting.')
+  }
+  return request(
+    `/conversations/${encodeURIComponent(conversationId)}/ask`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: query.trim(), top_k: topK }),
+    },
+  )
+}
+
+export function askConversationSQL(conversationId, question) {
+  if (!conversationId) {
+    throw new Error('Create a chat before running SQL analysis.')
+  }
+  if (!question || !question.trim()) {
+    throw new Error('Enter a question before submitting.')
+  }
+  return request(
+    `/conversations/${encodeURIComponent(conversationId)}/sql`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question: question.trim() }),
+    },
+  )
+}
+
+// Delete a dataset and the backend state associated with its spreadsheet.
+export function deleteDataset(datasetId) {
+  if (!datasetId) {
+    throw new Error('Select a dataset before deleting it.')
+  }
+
+  return request(
+    `/datasets/${encodeURIComponent(datasetId)}`,
+    { method: 'DELETE' },
+  )
+}
+
 // Retrieve dataset column information.
 export function getDatasetSchema(datasetId) {
   return request(
@@ -68,6 +217,23 @@ export function getDatasetPreview(datasetId) {
   return request(
     `/datasets/${encodeURIComponent(datasetId)}/preview`,
   )
+}
+
+export async function searchDataset(datasetId, query, topK = 5) {
+  if (!datasetId) {
+    throw new Error('Select a dataset before viewing its evidence.')
+  }
+  if (!query || !query.trim()) {
+    throw new Error('Enter a question before searching for evidence.')
+  }
+
+  const data = await request(
+    `/datasets/${encodeURIComponent(datasetId)}/search?query=${encodeURIComponent(query.trim())}&top_k=${encodeURIComponent(topK)}`,
+  )
+  if (!data || !Array.isArray(data.results)) {
+    throw new Error('Unexpected response from the dataset search API.')
+  }
+  return data.results
 }
 
 // Ask the AI Analyst a question about a dataset.
@@ -125,12 +291,12 @@ export function uploadDataset(file, onProgress) {
     return Promise.reject(new Error('Select a file to upload.'))
   }
 
-  const allowedExtensions = ['.csv', '.xlsx']
+  const allowedExtensions = ['.csv', '.xls', '.xlsx']
   const filename = file.name.toLowerCase()
 
   if (!allowedExtensions.some((extension) => filename.endsWith(extension))) {
     return Promise.reject(
-      new Error('Unsupported file type. Upload a CSV or XLSX file.'),
+      new Error('Unsupported file type. Upload a CSV or Excel file.'),
     )
   }
 

@@ -240,6 +240,49 @@ def test_ignores_relationship_with_unknown_column(
     assert relationship_edges == []
 
 
+def test_creates_evidence_nodes_with_dataset_provenance(sample_datasets):
+    graph = build_knowledge_graph(
+        sample_datasets[:1],
+        [],
+        evidence=[
+            {
+                "dataset_id": "1",
+                "chunk_id": "chunk-1",
+                "chunk_index": 0,
+                "text": "student_id: 1\nname: Ada",
+                "metadata": {"source_rows": [1]},
+            }
+        ],
+    )
+
+    evidence = next(
+        node for node in graph["nodes"] if node["type"] == "Evidence"
+    )
+    assert evidence["text"] == "student_id: 1\nname: Ada"
+    assert evidence["metadata"]["source_rows"] == [1]
+    assert {
+        edge["type"]
+        for edge in graph["edges"]
+        if edge["target"] == evidence["id"]
+    } == {"HAS_EVIDENCE"}
+
+
+def test_evidence_rejects_unknown_dataset(sample_datasets):
+    with pytest.raises(GraphBuilderError, match="unknown dataset"):
+        build_knowledge_graph(
+            sample_datasets[:1],
+            [],
+            evidence=[
+                {
+                    "dataset_id": "other",
+                    "chunk_id": "chunk-1",
+                    "chunk_index": 0,
+                    "text": "name: Ada",
+                }
+            ],
+        )
+
+
 def test_rejects_duplicate_dataset_ids(sample_datasets):
     sample_datasets.append(sample_datasets[0].copy())
 

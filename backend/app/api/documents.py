@@ -23,7 +23,7 @@ router = APIRouter(prefix="/documents", tags=["Documents"])
 # Define maximum allowed upload payload size in bytes (10 Megabytes)
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 # Define set of allowed spreadsheet file extension types
-ALLOWED_EXTENSIONS = {".csv", ".xlsx"}
+ALLOWED_EXTENSIONS = {".csv", ".xls", ".xlsx"}
 
 
 # Define POST endpoint at '/documents/upload' returning 200 OK status on success
@@ -39,7 +39,7 @@ async def upload_spreadsheet(file: UploadFile = File(...)):
     if not filename or extension not in ALLOWED_EXTENSIONS:
         raise HTTPException(
             status_code=400,  # Return 400 Bad Request
-            detail="Only .csv and .xlsx files are supported.",
+            detail="Only .csv, .xls, and .xlsx files are supported.",
         )
 
     # Initialize temporary file path reference variable for cleanup in finally block

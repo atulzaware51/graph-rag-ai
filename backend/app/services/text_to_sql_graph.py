@@ -19,6 +19,7 @@ class TextToSQLState(TypedDict, total=False):
 
     question: str
     dataset_id: str
+    graph_context: dict[str, Any]
     status: str
     result: dict[str, Any]
     error: str
@@ -62,9 +63,14 @@ def execute_query(state: TextToSQLState) -> dict[str, Any]:
     """Generate and execute SQL through the existing safe service."""
 
     try:
+        sql_arguments: dict[str, Any] = {
+            "question": state["question"],
+            "dataset_id": state["dataset_id"],
+        }
+        if state.get("graph_context") is not None:
+            sql_arguments["graph_context"] = state["graph_context"]
         result = ask_with_sql(
-            question=state["question"],
-            dataset_id=state["dataset_id"],
+            **sql_arguments,
         )
 
         return {
@@ -128,6 +134,8 @@ text_to_sql_graph = build_text_to_sql_graph()
 def ask_with_sql_graph(
     question: str,
     dataset_id: str,
+    *,
+    graph_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run the compiled LangGraph workflow."""
 
@@ -135,5 +143,6 @@ def ask_with_sql_graph(
         {
             "question": question,
             "dataset_id": dataset_id,
+            "graph_context": graph_context,
         }
     )

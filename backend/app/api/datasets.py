@@ -23,12 +23,21 @@ from backend.app.services.dataset_reader import (
     get_dataset_preview,
     list_datasets,
 )
-from backend.app.services.dataset_store import DatasetStorageError
+from backend.app.services.dataset_store import (
+    DatasetStorageError,
+    delete_spreadsheet,
+)
 from backend.app.services.retrieval import RetrievalError, retrieve_chunks
 from backend.app.services.schema_profiler import (
     SchemaProfilerError,
     profile_dataset,
 )
+from backend.app.services.graph_service import (
+    GraphServiceError,
+    build_graph_for_scope,
+)
+from backend.app.services.neo4j_store import Neo4jStoreError
+from backend.app.api.neo4j_errors import neo4j_unavailable_response
 
 
 router = APIRouter(prefix="/datasets", tags=["Datasets"])
@@ -58,6 +67,35 @@ def get_all_datasets():
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Could not list datasets.",
+        ) from exc
+
+
+@router.delete("/{dataset_id}")
+def delete_dataset(dataset_id: str):
+    """Delete a dataset and all associated graph and conversation data."""
+    try:
+        deleted = delete_spreadsheet(dataset_id)
+        if not deleted:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Dataset not found.",
+            )
+        return {
+            "status": "success",
+            "dataset_id": dataset_id,
+            "deleted": True,
+        }
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    except Neo4jStoreError as exc:
+        return neo4j_unavailable_response(exc)
+    except DatasetStorageError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Could not delete the dataset.",
         ) from exc
 
 
@@ -160,8 +198,13 @@ def ask_dataset_question(
 
         result = answer_question(
             query=request.query,
-            dataset_id=dataset_id,
+            dataset_ids=[dataset_id],
             top_k=request.top_k,
+            graph_context=build_graph_for_scope(
+                f"dataset-query:{dataset_id}",
+                dataset_ids=[dataset_id],
+                include_evidence=True,
+            ),
         )
         return result
 
@@ -190,6 +233,11 @@ def ask_dataset_question(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=str(exc),
         ) from exc
+    except GraphServiceError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Could not build graph context for the dataset.",
+        ) from exc
 
 # 
 
@@ -207,6 +255,10 @@ def ask_dataset_with_sql(
         result = ask_with_sql_graph(
             question=request.question,
             dataset_id=dataset_id,
+            graph_context=build_graph_for_scope(
+                f"dataset-query:{dataset_id}",
+                dataset_ids=[dataset_id],
+            ),
         )
 
         # LangGraph returns an error state for handled workflow failures.
@@ -280,6 +332,12 @@ def ask_dataset_with_sql(
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Text-to-SQL request could not be completed.",
+        ) from exc
+
+    except GraphServiceError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Could not build graph context for the dataset.",
         ) from exc
 
     except Exception as exc:

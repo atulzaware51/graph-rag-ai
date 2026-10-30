@@ -3,14 +3,19 @@ import pytest
 from backend.app.services.conversation_store import (
     ConversationStoreError,
     create_conversation,
+    delete_conversation,
     get_conversation,
+    get_conversation_graph,
     record_choice,
     record_clarification,
     record_execution,
     record_message,
     record_result_reference,
     record_sql,
+    set_conversation_datasets,
 )
+from backend.app.services.dataset_store import store_spreadsheet
+from backend.app.services import neo4j_store
 
 
 def test_conversation_records_message_clarification_choice_sql_and_execution(tmp_path):
@@ -22,7 +27,7 @@ def test_conversation_records_message_clarification_choice_sql_and_execution(tmp
         database_path=database_path,
     )
 
-    record_message(
+    assistant_message = record_message(
         conversation["conversation_id"],
         actor="user",
         message="Which customers had the highest revenue?",
@@ -98,3 +103,236 @@ def test_create_conversation_uses_default_title_when_blank():
 def test_record_event_rejects_missing_conversation():
     with pytest.raises(ConversationStoreError):
         record_message("missing-conversation", actor="user", message="hello")
+
+
+def test_conversation_events_are_persisted_as_an_isolated_graph(tmp_path):
+    database_path = tmp_path / "conversation.db"
+    first = create_conversation(title="First chat", database_path=database_path)
+    second = create_conversation(title="Second chat", database_path=database_path)
+
+    user_message = record_message(
+        first["conversation_id"],
+        actor="user",
+        message="Find the highest sales.",
+        metadata={"dataset_id": "sales-dataset"},
+        database_path=database_path,
+    )
+    assistant_message = record_message(
+        first["conversation_id"],
+        actor="assistant",
+        message="Sales were highest in May.",
+        metadata={
+            "dataset_id": "sales-dataset",
+            "sources": [
+                {
+                    "chunk_id": "sales-chunk",
+                    "chunk_index": 0,
+                    "score": 2,
+                }
+            ],
+        },
+        database_path=database_path,
+    )
+    query = record_sql(
+        first["conversation_id"],
+        actor="assistant",
+        sql="SELECT SUM(sales) FROM data",
+        metadata={"question": "Find the highest sales."},
+        database_path=database_path,
+    )
+    record_execution(
+        first["conversation_id"],
+        actor="system",
+        status="success",
+        metadata={"query_id": query["event_id"]},
+        database_path=database_path,
+    )
+    record_result_reference(
+        first["conversation_id"],
+        actor="assistant",
+        result_reference="result-1",
+        metadata={
+            "query_id": query["event_id"],
+            "row_count": 1,
+            "rows": [{"sales": 25}],
+        },
+        database_path=database_path,
+    )
+
+    graph = get_conversation_graph(
+        first["conversation_id"],
+        database_path=database_path,
+    )
+    node_ids = {node["id"] for node in graph["nodes"]}
+    assert {node["type"] for node in graph["nodes"]} >= {
+        "Chat",
+        "Message",
+        "SQLQuery",
+        "Execution",
+        "QueryResult",
+        "Evidence",
+    }
+    assert all(
+        edge["source"] in node_ids and edge["target"] in node_ids
+        for edge in graph["edges"]
+    )
+    assert any(
+        edge["type"] == "FOLLOWS"
+        and edge["source"] == f"event:{user_message['event_id']}"
+        and edge["target"] == f"event:{assistant_message['event_id']}"
+        for edge in graph["edges"]
+    )
+    assert any(edge["type"] == "ASKED_ABOUT" for edge in graph["edges"])
+    assert any(edge["type"] == "SUPPORTED_BY" for edge in graph["edges"])
+    assert any(
+        edge["type"] == "PRODUCED_RESULT"
+        and edge["source"] == f"event:{query['event_id']}"
+        for edge in graph["edges"]
+    )
+    assert all(
+        node["conversation_id"] == first["conversation_id"]
+        for node in graph["nodes"]
+    )
+    assert not any(
+        node["id"] == f"chat:{second['conversation_id']}"
+        for node in graph["nodes"]
+    )
+
+
+def test_conversation_dataset_selection_is_limited_and_persisted(tmp_path):
+    database_path = tmp_path / "datasets.db"
+    dataset_ids = []
+    for index in range(6):
+        source = tmp_path / f"sheet-{index}.csv"
+        source.write_text(f"value\n{index}\n", encoding="utf-8")
+        dataset = store_spreadsheet(
+            source,
+            source.name,
+            database_path,
+        )
+        dataset_ids.append(dataset["dataset_id"])
+
+    conversation = create_conversation(database_path=database_path)
+    selected = set_conversation_datasets(
+        conversation["conversation_id"],
+        dataset_ids[:5],
+        database_path=database_path,
+    )
+    assert selected["selected_dataset_ids"] == dataset_ids[:5]
+    assert get_conversation(
+        conversation["conversation_id"],
+        database_path=database_path,
+    )["selected_dataset_ids"] == dataset_ids[:5]
+    graph = get_conversation_graph(
+        conversation["conversation_id"],
+        database_path=database_path,
+    )
+    assert len(
+        [edge for edge in graph["edges"] if edge["type"] == "USES_DATASET"]
+    ) == 5
+    assert len(
+        [node for node in graph["nodes"] if node["type"] == "Column"]
+    ) == 5
+
+    with pytest.raises(ValueError, match="at most five"):
+        set_conversation_datasets(
+            conversation["conversation_id"],
+            dataset_ids,
+            database_path=database_path,
+        )
+
+    with pytest.raises(ConversationStoreError, match="do not exist"):
+        set_conversation_datasets(
+            conversation["conversation_id"],
+            ["f" * 32],
+            database_path=database_path,
+        )
+
+
+def test_delete_conversation_removes_its_history_graph_only(tmp_path):
+    database_path = tmp_path / "conversation.db"
+    first = create_conversation(database_path=database_path)
+    second = create_conversation(database_path=database_path)
+    record_message(
+        first["conversation_id"],
+        actor="user",
+        message="Delete only this history.",
+        database_path=database_path,
+    )
+
+    assert delete_conversation(
+        first["conversation_id"],
+        database_path=database_path,
+    )
+    assert not delete_conversation(
+        first["conversation_id"],
+        database_path=database_path,
+    )
+    assert get_conversation(
+        second["conversation_id"],
+        database_path=database_path,
+    )["events"] == []
+
+
+def test_neo4j_failure_preserves_conversation_in_sqlite(tmp_path, monkeypatch):
+    database_path = tmp_path / "conversation.db"
+    conversation = create_conversation(
+        title="Keep on failed graph deletion",
+        database_path=database_path,
+    )
+    failure = neo4j_store.Neo4jStoreError(
+        "Neo4j unavailable.",
+        code="NEO4J_UNAVAILABLE",
+    )
+    monkeypatch.setattr(
+        neo4j_store,
+        "delete_graphs",
+        lambda _scopes: (_ for _ in ()).throw(failure),
+    )
+
+    with pytest.raises(ConversationStoreError):
+        delete_conversation(
+            conversation["conversation_id"],
+            database_path,
+        )
+
+    assert get_conversation(
+        conversation["conversation_id"],
+        database_path,
+    )["conversation_id"] == conversation["conversation_id"]
+
+
+def test_conversation_graph_falls_back_to_sqlite_when_neo4j_fails(
+    tmp_path,
+    monkeypatch,
+    caplog,
+):
+    database_path = tmp_path / "conversation.db"
+    conversation = create_conversation(database_path=database_path)
+    record_message(
+        conversation["conversation_id"],
+        actor="user",
+        message="Keep this graph available.",
+        database_path=database_path,
+    )
+    monkeypatch.setattr(neo4j_store, "is_configured", lambda: True)
+    monkeypatch.setattr(
+        neo4j_store,
+        "sync_graph",
+        lambda *_args: (_ for _ in ()).throw(
+            neo4j_store.Neo4jStoreError(
+                "Neo4j unavailable.",
+                code="NEO4J_UNAVAILABLE",
+            )
+        ),
+    )
+
+    with caplog.at_level("WARNING"):
+        graph = get_conversation_graph(
+            conversation["conversation_id"],
+            database_path,
+        )
+
+    assert any(node["type"] == "Message" for node in graph["nodes"])
+    assert graph["graph_store"] == "sqlite"
+    assert "serving SQLite graph" in caplog.text

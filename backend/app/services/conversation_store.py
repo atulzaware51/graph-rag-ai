@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import uuid
 from datetime import datetime, timezone
@@ -11,10 +12,42 @@ from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_DATABASE = PROJECT_ROOT / "data" / "graphsheet.db"
+logger = logging.getLogger(__name__)
 
 
 class ConversationStoreError(RuntimeError):
     """Raised when conversation persistence fails."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str | None = None,
+        retry_after_seconds: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.retry_after_seconds = retry_after_seconds
+
+
+def _sync_neo4j_graph(conversation_id: str, database_path: str | Path) -> None:
+    """Project the SQLite conversation graph into Neo4j when configured."""
+    from backend.app.services.neo4j_store import (
+        Neo4jStoreError,
+        is_configured,
+        sync_graph,
+    )
+
+    if not is_configured():
+        return
+    try:
+        graph = _get_sqlite_conversation_graph(conversation_id, database_path)
+        sync_graph(conversation_id, graph)
+    except Neo4jStoreError as exc:
+        logger.warning(
+            "Neo4j conversation graph sync failed; SQLite remains authoritative (%s).",
+            exc.code,
+        )
 
 
 def _utc_timestamp() -> str:
@@ -28,12 +61,14 @@ def _ensure_tables(database_path: str | Path) -> None:
     database.parent.mkdir(parents=True, exist_ok=True)
 
     with sqlite3.connect(database) as connection:
+        connection.row_factory = sqlite3.Row
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS conversations (
                 conversation_id TEXT PRIMARY KEY,
                 title TEXT NOT NULL,
                 dataset_id TEXT,
+                selected_dataset_ids TEXT NOT NULL DEFAULT '[]',
                 status TEXT NOT NULL DEFAULT 'active',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
@@ -70,6 +105,374 @@ def _ensure_tables(database_path: str | Path) -> None:
             ON conversation_events (conversation_id, event_type, created_at)
             """
         )
+        conversation_columns = {
+            row["name"]
+            for row in connection.execute(
+                "PRAGMA table_info(conversations)"
+            )
+        }
+        if "selected_dataset_ids" not in conversation_columns:
+            connection.execute(
+                """
+                ALTER TABLE conversations
+                ADD COLUMN selected_dataset_ids TEXT NOT NULL DEFAULT '[]'
+                """
+            )
+            connection.execute(
+                """
+                UPDATE conversations
+                SET selected_dataset_ids = json_array(dataset_id)
+                WHERE dataset_id IS NOT NULL
+                """
+            )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS graph_nodes (
+                node_id TEXT PRIMARY KEY,
+                conversation_id TEXT NOT NULL,
+                node_type TEXT NOT NULL,
+                label TEXT NOT NULL,
+                properties_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (conversation_id)
+                    REFERENCES conversations(conversation_id)
+                    ON DELETE CASCADE
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_graph_nodes_conversation
+            ON graph_nodes (conversation_id, node_type)
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS graph_edges (
+                edge_id TEXT PRIMARY KEY,
+                conversation_id TEXT NOT NULL,
+                source_id TEXT NOT NULL,
+                target_id TEXT NOT NULL,
+                relationship TEXT NOT NULL,
+                properties_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (conversation_id)
+                    REFERENCES conversations(conversation_id)
+                    ON DELETE CASCADE,
+                FOREIGN KEY (source_id)
+                    REFERENCES graph_nodes(node_id)
+                    ON DELETE CASCADE,
+                FOREIGN KEY (target_id)
+                    REFERENCES graph_nodes(node_id)
+                    ON DELETE CASCADE
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_graph_edges_conversation
+            ON graph_edges (conversation_id, relationship)
+            """
+        )
+
+
+def _upsert_graph_node(
+    connection: sqlite3.Connection,
+    *,
+    node_id: str,
+    conversation_id: str,
+    node_type: str,
+    label: str,
+    properties: dict[str, Any],
+    created_at: str,
+) -> None:
+    connection.execute(
+        """
+        INSERT INTO graph_nodes (
+            node_id, conversation_id, node_type, label, properties_json, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(node_id) DO UPDATE SET
+            label = excluded.label,
+            properties_json = excluded.properties_json
+        """,
+        (
+            node_id,
+            conversation_id,
+            node_type,
+            label,
+            json.dumps(properties, ensure_ascii=False, separators=(",", ":")),
+            created_at,
+        ),
+    )
+
+
+def _upsert_graph_edge(
+    connection: sqlite3.Connection,
+    *,
+    edge_id: str,
+    conversation_id: str,
+    source_id: str,
+    target_id: str,
+    relationship: str,
+    properties: dict[str, Any] | None = None,
+    created_at: str,
+) -> None:
+    connection.execute(
+        """
+        INSERT INTO graph_edges (
+            edge_id, conversation_id, source_id, target_id,
+            relationship, properties_json, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(edge_id) DO UPDATE SET
+            properties_json = excluded.properties_json
+        """,
+        (
+            edge_id,
+            conversation_id,
+            source_id,
+            target_id,
+            relationship,
+            json.dumps(properties or {}, ensure_ascii=False, separators=(",", ":")),
+            created_at,
+        ),
+    )
+
+
+def _ensure_chat_graph_node(
+    connection: sqlite3.Connection,
+    conversation_id: str,
+    title: str,
+    timestamp: str,
+) -> None:
+    _upsert_graph_node(
+        connection,
+        node_id=f"chat:{conversation_id}",
+        conversation_id=conversation_id,
+        node_type="Chat",
+        label=title,
+        properties={
+            "conversation_id": conversation_id,
+            "title": title,
+        },
+        created_at=timestamp,
+    )
+
+
+def _write_selected_datasets(
+    connection: sqlite3.Connection,
+    conversation_id: str,
+    dataset_ids: list[str],
+    timestamp: str,
+) -> None:
+    chat_node_id = f"chat:{conversation_id}"
+    connection.execute(
+        """
+        DELETE FROM graph_edges
+        WHERE conversation_id = ? AND relationship = 'USES_DATASET'
+        """,
+        (conversation_id,),
+    )
+    for dataset_id in dataset_ids:
+        dataset_node_id = f"dataset:{conversation_id}:{dataset_id}"
+        dataset_metadata = {}
+        table_rows = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+        if "datasets" in table_rows:
+            row = connection.execute(
+                """
+                SELECT original_filename, table_name
+                FROM datasets
+                WHERE dataset_id = ?
+                """,
+                (dataset_id,),
+            ).fetchone()
+            if row is not None:
+                dataset_metadata = {
+                    "filename": row["original_filename"],
+                    "table_name": row["table_name"],
+                }
+        _upsert_graph_node(
+            connection,
+            node_id=dataset_node_id,
+            conversation_id=conversation_id,
+            node_type="Dataset",
+            label=dataset_metadata.get("filename", dataset_id),
+            properties={
+                "dataset_id": dataset_id,
+                **dataset_metadata,
+            },
+            created_at=timestamp,
+        )
+        if "dataset_columns" in table_rows:
+            columns = connection.execute(
+                """
+                SELECT original_name, sql_name, data_type
+                FROM dataset_columns
+                WHERE dataset_id = ?
+                ORDER BY ordinal
+                """,
+                (dataset_id,),
+            ).fetchall()
+            for column in columns:
+                column_node_id = (
+                    f"column:{conversation_id}:{dataset_id}:"
+                    f"{column['sql_name']}"
+                )
+                _upsert_graph_node(
+                    connection,
+                    node_id=column_node_id,
+                    conversation_id=conversation_id,
+                    node_type="Column",
+                    label=column["original_name"],
+                    properties={
+                        "dataset_id": dataset_id,
+                        "sql_name": column["sql_name"],
+                        "data_type": column["data_type"],
+                    },
+                    created_at=timestamp,
+                )
+                _upsert_graph_edge(
+                    connection,
+                    edge_id=(
+                        f"dataset-column:{conversation_id}:"
+                        f"{dataset_id}:{column['sql_name']}"
+                    ),
+                    conversation_id=conversation_id,
+                    source_id=dataset_node_id,
+                    target_id=column_node_id,
+                    relationship="HAS_COLUMN",
+                    created_at=timestamp,
+                )
+        _upsert_graph_edge(
+            connection,
+            edge_id=f"chat-dataset:{conversation_id}:{dataset_id}",
+            conversation_id=conversation_id,
+            source_id=chat_node_id,
+            target_id=dataset_node_id,
+            relationship="USES_DATASET",
+            created_at=timestamp,
+        )
+
+
+def validate_dataset_ids(
+    dataset_ids: list[str],
+    database_path: str | Path = DEFAULT_DATABASE,
+) -> list[str]:
+    """Validate and normalize a chat's selected dataset IDs."""
+    if not isinstance(dataset_ids, list):
+        raise ValueError("Selected dataset IDs must be a list.")
+    if len(dataset_ids) > 5:
+        raise ValueError("A chat can use at most five datasets.")
+    if any(not isinstance(value, str) or not value.strip() for value in dataset_ids):
+        raise ValueError("Dataset IDs must be non-empty strings.")
+
+    normalized = list(dict.fromkeys(value.strip() for value in dataset_ids))
+    if len(normalized) > 5:
+        raise ValueError("A chat can use at most five datasets.")
+    if not normalized:
+        return normalized
+
+    database = Path(database_path)
+    try:
+        with sqlite3.connect(database) as connection:
+            registered_tables = {
+                row[0]
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                )
+            }
+            if "datasets" not in registered_tables:
+                raise ConversationStoreError(
+                    "No uploaded datasets are registered."
+                )
+            placeholders = ", ".join("?" for _ in normalized)
+            rows = connection.execute(
+                "SELECT dataset_id FROM datasets "
+                f"WHERE dataset_id IN ({placeholders})",
+                tuple(normalized),
+            ).fetchall()
+    except sqlite3.Error as exc:
+        raise ConversationStoreError(
+            "Could not validate the selected datasets."
+        ) from exc
+
+    found = {row[0] for row in rows}
+    missing = [dataset_id for dataset_id in normalized if dataset_id not in found]
+    if missing:
+        raise ConversationStoreError(
+            "One or more selected datasets do not exist."
+        )
+    return normalized
+
+
+def set_conversation_datasets(
+    conversation_id: str,
+    dataset_ids: list[str],
+    database_path: str | Path = DEFAULT_DATABASE,
+) -> dict[str, Any]:
+    """Replace the datasets selected for a conversation."""
+    selected_ids = validate_dataset_ids(dataset_ids, database_path)
+    _ensure_tables(database_path)
+    timestamp = _utc_timestamp()
+
+    with sqlite3.connect(database_path) as connection:
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.row_factory = sqlite3.Row
+        exists = connection.execute(
+            "SELECT title FROM conversations WHERE conversation_id = ?",
+            (conversation_id,),
+        ).fetchone()
+        if exists is None:
+            raise ConversationStoreError("Conversation not found.")
+
+        connection.execute(
+            """
+            UPDATE conversations
+            SET dataset_id = ?, selected_dataset_ids = ?, updated_at = ?
+            WHERE conversation_id = ?
+            """,
+            (
+                selected_ids[0] if selected_ids else None,
+                json.dumps(selected_ids, separators=(",", ":")),
+                timestamp,
+                conversation_id,
+            ),
+        )
+        _write_selected_datasets(
+            connection,
+            conversation_id,
+            selected_ids,
+            timestamp,
+        )
+        _ensure_chat_graph_node(
+            connection,
+            conversation_id,
+            exists["title"],
+            timestamp,
+        )
+
+    _sync_neo4j_graph(conversation_id, database_path)
+    from backend.app.services.neo4j_store import (
+        Neo4jStoreError,
+        delete_graph,
+    )
+    try:
+        delete_graph(f"chat-schema:{conversation_id}")
+    except Neo4jStoreError as exc:
+        logger.warning(
+            "Neo4j selected-sheet graph cleanup failed; it will be rebuilt from SQLite (%s).",
+            exc.code,
+        )
+    return {
+        "conversation_id": conversation_id,
+        "dataset_id": selected_ids[0] if selected_ids else None,
+        "selected_dataset_ids": selected_ids,
+        "updated_at": timestamp,
+    }
 
 
 def _event_from_row(row: sqlite3.Row) -> dict[str, Any]:
@@ -94,6 +497,8 @@ def _event_from_row(row: sqlite3.Row) -> dict[str, Any]:
 def create_conversation(
     title: str | None = None,
     dataset_id: str | None = None,
+    selected_dataset_ids: list[str] | None = None,
+    conversation_id: str | None = None,
     database_path: str | Path = DEFAULT_DATABASE,
 ) -> dict[str, Any]:
     """Create a conversation and return its metadata."""
@@ -101,35 +506,82 @@ def create_conversation(
     _ensure_tables(database)
 
     title_value = (title or "New conversation").strip() or "New conversation"
+    selected_ids = list(selected_dataset_ids or [])
+    if dataset_id and dataset_id not in selected_ids:
+        selected_ids.insert(0, dataset_id)
+    if len(selected_ids) > 5:
+        raise ValueError("A chat can use at most five datasets.")
+    if any(not isinstance(value, str) or not value.strip() for value in selected_ids):
+        raise ValueError("Dataset IDs must be non-empty strings.")
+    selected_ids = list(dict.fromkeys(value.strip() for value in selected_ids))
+    if len(selected_ids) > 5:
+        raise ValueError("A chat can use at most five datasets.")
+    primary_dataset_id = selected_ids[0] if selected_ids else None
+    if conversation_id is not None:
+        try:
+            conversation_id = str(uuid.UUID(conversation_id))
+        except (ValueError, AttributeError) as exc:
+            raise ValueError("Conversation ID must be a valid UUID.") from exc
+        existing = None
+        if database.is_file():
+            with sqlite3.connect(database) as connection:
+                existing = connection.execute(
+                    """
+                    SELECT 1 FROM conversations WHERE conversation_id = ?
+                    """,
+                    (conversation_id,),
+                ).fetchone()
+        if existing is not None:
+            return get_conversation(conversation_id, database)
+    else:
+        conversation_id = uuid.uuid4().hex
+
     timestamp = _utc_timestamp()
-    conversation_id = uuid.uuid4().hex
 
     with sqlite3.connect(database) as connection:
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
         connection.execute(
             """
             INSERT INTO conversations (
                 conversation_id,
                 title,
                 dataset_id,
+                selected_dataset_ids,
                 status,
                 created_at,
                 updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 conversation_id,
                 title_value,
-                dataset_id,
+                primary_dataset_id,
+                json.dumps(selected_ids, separators=(",", ":")),
                 "active",
                 timestamp,
                 timestamp,
             ),
         )
+        _ensure_chat_graph_node(
+            connection,
+            conversation_id,
+            title_value,
+            timestamp,
+        )
+        _write_selected_datasets(
+            connection,
+            conversation_id,
+            selected_ids,
+            timestamp,
+        )
 
+    _sync_neo4j_graph(conversation_id, database)
     return {
         "conversation_id": conversation_id,
         "title": title_value,
-        "dataset_id": dataset_id,
+        "dataset_id": primary_dataset_id,
+        "selected_dataset_ids": selected_ids,
         "status": "active",
         "created_at": timestamp,
         "updated_at": timestamp,
@@ -148,7 +600,8 @@ def list_conversations(
         connection.row_factory = sqlite3.Row
         rows = connection.execute(
             """
-            SELECT conversation_id, title, dataset_id, status, created_at, updated_at
+            SELECT conversation_id, title, dataset_id, selected_dataset_ids,
+                   status, created_at, updated_at
             FROM conversations
             ORDER BY updated_at DESC, created_at DESC
             """
@@ -159,6 +612,7 @@ def list_conversations(
             "conversation_id": row["conversation_id"],
             "title": row["title"],
             "dataset_id": row["dataset_id"],
+            "selected_dataset_ids": json.loads(row["selected_dataset_ids"]),
             "status": row["status"],
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
@@ -179,7 +633,8 @@ def get_conversation(
         connection.row_factory = sqlite3.Row
         conversation = connection.execute(
             """
-            SELECT conversation_id, title, dataset_id, status, created_at, updated_at
+            SELECT conversation_id, title, dataset_id, selected_dataset_ids,
+                   status, created_at, updated_at
             FROM conversations
             WHERE conversation_id = ?
             """,
@@ -204,6 +659,9 @@ def get_conversation(
         "conversation_id": conversation["conversation_id"],
         "title": conversation["title"],
         "dataset_id": conversation["dataset_id"],
+        "selected_dataset_ids": json.loads(
+            conversation["selected_dataset_ids"]
+        ),
         "status": conversation["status"],
         "created_at": conversation["created_at"],
         "updated_at": conversation["updated_at"],
@@ -259,6 +717,20 @@ def record_event(
             """,
             (conversation_id,),
         ).fetchone()[0]
+        previous_event = connection.execute(
+            """
+            SELECT event_id
+            FROM conversation_events
+            WHERE conversation_id = ?
+            ORDER BY event_order DESC
+            LIMIT 1
+            """,
+            (conversation_id,),
+        ).fetchone()
+        conversation = connection.execute(
+            "SELECT title FROM conversations WHERE conversation_id = ?",
+            (conversation_id,),
+        ).fetchone()
 
         event_id = uuid.uuid4().hex
         created_at = _utc_timestamp()
@@ -292,11 +764,278 @@ def record_event(
             ),
         )
 
+        if isinstance(message, str) and (
+            (event_type == "message" and actor == "user")
+            or event_type == "upload"
+        ):
+            current_title = connection.execute(
+                """
+                SELECT title FROM conversations
+                WHERE conversation_id = ?
+                """,
+                (conversation_id,),
+            ).fetchone()["title"]
+            if current_title == "New chat":
+                title = (
+                    Path(message).stem
+                    if event_type == "upload"
+                    else message.strip()[:48]
+                )
+                connection.execute(
+                    """
+                    UPDATE conversations
+                    SET title = ?
+                    WHERE conversation_id = ?
+                    """,
+                    (title or "New chat", conversation_id),
+                )
+
         connection.execute(
             "UPDATE conversations SET updated_at = ? WHERE conversation_id = ?",
             (created_at, conversation_id),
         )
 
+        _ensure_chat_graph_node(
+            connection,
+            conversation_id,
+            conversation["title"],
+            created_at,
+        )
+        node_type = {
+            "message": "Message",
+            "sql": "SQLQuery",
+            "execution": "Execution",
+            "result_reference": "QueryResult",
+        }.get(event_type, event_type.replace("_", " ").title())
+        node_id = f"event:{event_id}"
+        label = (
+            message
+            or metadata_payload.get("question")
+            or metadata_payload.get("sql")
+            or event_type
+        )
+        _upsert_graph_node(
+            connection,
+            node_id=node_id,
+            conversation_id=conversation_id,
+            node_type=node_type,
+            label=str(label),
+            properties={
+                "metadata": metadata_payload,
+                **metadata_payload,
+                "event_id": event_id,
+                "event_type": event_type,
+                "actor": actor,
+                "message": message,
+                "result_reference": result_reference,
+                "event_order": event_order,
+            },
+            created_at=created_at,
+        )
+        graph_relationship = {
+            "message": "HAS_MESSAGE",
+            "sql": "HAS_QUERY",
+        }.get(event_type, "HAS_EVENT")
+        _upsert_graph_edge(
+            connection,
+            edge_id=f"chat-event:{conversation_id}:{event_id}",
+            conversation_id=conversation_id,
+            source_id=f"chat:{conversation_id}",
+            target_id=node_id,
+            relationship=graph_relationship,
+            created_at=created_at,
+        )
+        if previous_event is not None:
+            _upsert_graph_edge(
+                connection,
+                edge_id=(
+                    f"follows:{conversation_id}:"
+                    f"{previous_event['event_id']}:{event_id}"
+                ),
+                conversation_id=conversation_id,
+                source_id=f"event:{previous_event['event_id']}",
+                target_id=node_id,
+                relationship="FOLLOWS",
+                created_at=created_at,
+            )
+
+        dataset_ids = metadata_payload.get("dataset_ids", [])
+        if not isinstance(dataset_ids, list):
+            dataset_ids = []
+        dataset_id = metadata_payload.get("dataset_id")
+        if isinstance(dataset_id, str) and dataset_id not in dataset_ids:
+            dataset_ids.append(dataset_id)
+        for selected_dataset_id in dataset_ids:
+            if not isinstance(selected_dataset_id, str) or not selected_dataset_id:
+                continue
+            dataset_node_id = (
+                f"dataset:{conversation_id}:{selected_dataset_id}"
+            )
+            _upsert_graph_node(
+                connection,
+                node_id=dataset_node_id,
+                conversation_id=conversation_id,
+                node_type="Dataset",
+                label=selected_dataset_id,
+                properties={"dataset_id": selected_dataset_id},
+                created_at=created_at,
+            )
+            if event_type == "sql":
+                _upsert_graph_edge(
+                    connection,
+                    edge_id=f"query-dataset:{event_id}:{selected_dataset_id}",
+                    conversation_id=conversation_id,
+                    source_id=node_id,
+                    target_id=dataset_node_id,
+                    relationship="QUERIES_DATASET",
+                    created_at=created_at,
+                )
+            elif event_type == "upload":
+                _upsert_graph_edge(
+                    connection,
+                    edge_id=f"upload-dataset:{event_id}:{selected_dataset_id}",
+                    conversation_id=conversation_id,
+                    source_id=node_id,
+                    target_id=dataset_node_id,
+                    relationship="UPLOADS_DATASET",
+                    created_at=created_at,
+                )
+            elif event_type == "message":
+                _upsert_graph_edge(
+                    connection,
+                    edge_id=f"message-dataset:{event_id}:{selected_dataset_id}",
+                    conversation_id=conversation_id,
+                    source_id=node_id,
+                    target_id=dataset_node_id,
+                    relationship="ASKED_ABOUT",
+                    created_at=created_at,
+                )
+            read_columns = metadata_payload.get("read_columns", [])
+            read_column_refs = metadata_payload.get("read_column_refs")
+            if event_type == "sql" and isinstance(read_columns, list):
+                if isinstance(read_column_refs, list):
+                    dataset_table = connection.execute(
+                        "SELECT table_name FROM datasets WHERE dataset_id = ?",
+                        (selected_dataset_id,),
+                    ).fetchone()
+                    table_name = (
+                        dataset_table["table_name"]
+                        if dataset_table is not None
+                        else None
+                    )
+                    selected_columns = [
+                        reference.get("column")
+                        for reference in read_column_refs
+                        if isinstance(reference, dict)
+                        and reference.get("table") == table_name
+                    ]
+                else:
+                    selected_columns = read_columns
+                for column_name in selected_columns:
+                    if not isinstance(column_name, str) or not column_name:
+                        continue
+                    column_node_id = (
+                        f"column:{conversation_id}:"
+                        f"{selected_dataset_id}:{column_name}"
+                    )
+                    existing_column = connection.execute(
+                        "SELECT 1 FROM graph_nodes WHERE node_id = ?",
+                        (column_node_id,),
+                    ).fetchone()
+                    if existing_column is None:
+                        _upsert_graph_node(
+                            connection,
+                            node_id=column_node_id,
+                            conversation_id=conversation_id,
+                            node_type="Column",
+                            label=column_name,
+                            properties={
+                                "dataset_id": selected_dataset_id,
+                                "sql_name": column_name,
+                            },
+                            created_at=created_at,
+                        )
+                    _upsert_graph_edge(
+                        connection,
+                        edge_id=(
+                            f"dataset-column:{conversation_id}:"
+                            f"{selected_dataset_id}:{column_name}"
+                        ),
+                        conversation_id=conversation_id,
+                        source_id=dataset_node_id,
+                        target_id=column_node_id,
+                        relationship="HAS_COLUMN",
+                        created_at=created_at,
+                    )
+                    _upsert_graph_edge(
+                        connection,
+                        edge_id=(
+                            f"query-column:{event_id}:"
+                            f"{selected_dataset_id}:{column_name}"
+                        ),
+                        conversation_id=conversation_id,
+                        source_id=node_id,
+                        target_id=column_node_id,
+                        relationship="READS_COLUMN",
+                        created_at=created_at,
+                    )
+
+        sources = metadata_payload.get("sources", [])
+        if event_type == "message" and isinstance(sources, list):
+            for source in sources:
+                if not isinstance(source, dict):
+                    continue
+                chunk_id = source.get("chunk_id")
+                if not isinstance(chunk_id, str) or not chunk_id:
+                    continue
+                evidence_node_id = (
+                    f"evidence:{conversation_id}:{event_id}:{chunk_id}"
+                )
+                _upsert_graph_node(
+                    connection,
+                    node_id=evidence_node_id,
+                    conversation_id=conversation_id,
+                    node_type="Evidence",
+                    label=f"Evidence chunk {source.get('chunk_index', '')}",
+                    properties=source,
+                    created_at=created_at,
+                )
+                _upsert_graph_edge(
+                    connection,
+                    edge_id=f"message-evidence:{event_id}:{chunk_id}",
+                    conversation_id=conversation_id,
+                    source_id=node_id,
+                    target_id=evidence_node_id,
+                    relationship="SUPPORTED_BY",
+                    created_at=created_at,
+                )
+
+        query_id = metadata_payload.get("query_id")
+        if isinstance(query_id, str):
+            query_node_id = f"event:{query_id}"
+            query_exists = connection.execute(
+                "SELECT 1 FROM graph_nodes WHERE node_id = ?",
+                (query_node_id,),
+            ).fetchone()
+            if query_exists is not None and event_type in {
+                "execution",
+                "result_reference",
+            }:
+                _upsert_graph_edge(
+                    connection,
+                    edge_id=f"query-event:{query_id}:{event_id}",
+                    conversation_id=conversation_id,
+                    source_id=query_node_id,
+                    target_id=node_id,
+                    relationship=(
+                        "PRODUCED_RESULT"
+                        if event_type == "result_reference"
+                        else "HAS_EXECUTION"
+                    ),
+                    created_at=created_at,
+                )
+
+    _sync_neo4j_graph(conversation_id, database)
     return {
         "event_id": event_id,
         "conversation_id": conversation_id,
@@ -308,6 +1047,144 @@ def record_event(
         "created_at": created_at,
         "event_order": event_order,
     }
+
+
+def get_conversation_graph(
+    conversation_id: str,
+    database_path: str | Path = DEFAULT_DATABASE,
+) -> dict[str, Any]:
+    """Return the persisted graph for one conversation."""
+    from backend.app.services.neo4j_store import (
+        Neo4jStoreError,
+        get_graph,
+        is_configured,
+        sync_graph,
+    )
+
+    if is_configured():
+        sqlite_graph = _get_sqlite_conversation_graph(
+            conversation_id,
+            database_path,
+        )
+        try:
+            sync_graph(conversation_id, sqlite_graph)
+            return {
+                "conversation_id": conversation_id,
+                **get_graph(conversation_id),
+            }
+        except Neo4jStoreError as exc:
+            logger.warning(
+                "Neo4j conversation graph unavailable; serving SQLite graph (%s).",
+                exc.code,
+            )
+            return {
+                **sqlite_graph,
+                "conversation_id": conversation_id,
+                "graph_store": "sqlite",
+            }
+    return _get_sqlite_conversation_graph(conversation_id, database_path)
+
+
+def _get_sqlite_conversation_graph(
+    conversation_id: str,
+    database_path: str | Path = DEFAULT_DATABASE,
+) -> dict[str, Any]:
+    """Read the local graph projection used as the durable event outbox."""
+    database = Path(database_path)
+    _ensure_tables(database)
+
+    with sqlite3.connect(database) as connection:
+        connection.row_factory = sqlite3.Row
+        exists = connection.execute(
+            "SELECT 1 FROM conversations WHERE conversation_id = ?",
+            (conversation_id,),
+        ).fetchone()
+        if exists is None:
+            raise ConversationStoreError("Conversation not found.")
+
+        node_rows = connection.execute(
+            """
+            SELECT node_id, node_type, label, properties_json, created_at
+            FROM graph_nodes
+            WHERE conversation_id = ?
+            ORDER BY created_at, node_id
+            """,
+            (conversation_id,),
+        ).fetchall()
+        edge_rows = connection.execute(
+            """
+            SELECT edge_id, source_id, target_id, relationship, properties_json
+            FROM graph_edges
+            WHERE conversation_id = ?
+            ORDER BY created_at, edge_id
+            """,
+            (conversation_id,),
+        ).fetchall()
+
+    return {
+        "conversation_id": conversation_id,
+        "nodes": [
+            {
+                **json.loads(row["properties_json"]),
+                "id": row["node_id"],
+                "type": row["node_type"],
+                "label": row["label"],
+                "conversation_id": conversation_id,
+                "created_at": row["created_at"],
+            }
+            for row in node_rows
+        ],
+        "edges": [
+            {
+                **json.loads(row["properties_json"]),
+                "id": row["edge_id"],
+                "source": row["source_id"],
+                "target": row["target_id"],
+                "type": row["relationship"],
+            }
+            for row in edge_rows
+        ],
+    }
+
+
+def delete_conversation(
+    conversation_id: str,
+    database_path: str | Path = DEFAULT_DATABASE,
+) -> bool:
+    """Delete one conversation and its graph nodes and edges."""
+    _ensure_tables(database_path)
+    with sqlite3.connect(database_path) as connection:
+        exists = connection.execute(
+            "SELECT 1 FROM conversations WHERE conversation_id = ?",
+            (conversation_id,),
+        ).fetchone()
+    if exists is None:
+        return False
+
+    from backend.app.services.neo4j_store import (
+        Neo4jStoreError,
+        delete_graphs,
+    )
+
+    try:
+        delete_graphs(
+            [conversation_id, f"chat-schema:{conversation_id}"]
+        )
+    except Neo4jStoreError as exc:
+        raise ConversationStoreError(
+            str(exc),
+            code=exc.code,
+            retry_after_seconds=exc.retry_after_seconds,
+        ) from exc
+
+    with sqlite3.connect(database_path) as connection:
+        connection.execute("PRAGMA foreign_keys = ON")
+        cursor = connection.execute(
+            "DELETE FROM conversations WHERE conversation_id = ?",
+            (conversation_id,),
+        )
+        deleted = cursor.rowcount > 0
+    return deleted
 
 
 def record_message(

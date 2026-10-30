@@ -103,6 +103,19 @@ def test_detects_relationship_with_shared_student_ids(tmp_path):
     assert columns == {"student_id", "student_id"}
 
 
+def test_relationship_inference_is_limited_to_selected_datasets(tmp_path):
+    database_path = tmp_path / "selected.db"
+    create_test_database(database_path)
+
+    result = infer_relationships(
+        database_path,
+        dataset_ids=["students-1"],
+    )
+
+    assert result["dataset_count"] == 1
+    assert result["relationships"] == []
+
+
 def test_does_not_match_disjoint_student_ids(tmp_path):
     database_path = tmp_path / "test.db"
     create_test_database(database_path, include_match=False)

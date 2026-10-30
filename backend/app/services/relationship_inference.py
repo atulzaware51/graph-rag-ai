@@ -122,6 +122,7 @@ def _table_fingerprint(
 
 def infer_relationships(
     database_path: str | Path = "data/graphsheet.db",
+    dataset_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     """Suggest candidate relationships based on names and shared values.
 
@@ -157,16 +158,26 @@ def infer_relationships(
                     "'original_filename' or 'filename'."
                 )
 
-            datasets = connection.execute(
-                f"""
+            query = f"""
                 SELECT
                     dataset_id,
                     {_quote_identifier(filename_column)} AS filename,
                     table_name
                 FROM datasets
-                ORDER BY dataset_id
-                """
-            ).fetchall()
+            """
+            parameters: tuple[str, ...] = ()
+            if dataset_ids is not None:
+                if not dataset_ids:
+                    return {
+                        "dataset_count": 0,
+                        "relationship_count": 0,
+                        "relationships": [],
+                    }
+                placeholders = ", ".join("?" for _ in dataset_ids)
+                query += f" WHERE dataset_id IN ({placeholders})"
+                parameters = tuple(dataset_ids)
+            query += " ORDER BY dataset_id"
+            datasets = connection.execute(query, parameters).fetchall()
 
             dataset_columns: list[dict[str, Any]] = []
             dataset_fingerprints: dict[str, str] = {}

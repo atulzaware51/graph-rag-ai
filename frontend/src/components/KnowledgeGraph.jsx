@@ -1,8 +1,10 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import ForceGraph2D from 'react-force-graph-2d'
-import { getKnowledgeGraph } from '../services/api'
-import { buildChatGraph } from './chatGraph'
+import {
+  getConversationGraph,
+  getKnowledgeGraph,
+} from '../services/api'
 import './KnowledgeGraph.css'
 
 export default function KnowledgeGraph({ chat, onQuery }) {
@@ -21,8 +23,8 @@ export default function KnowledgeGraph({ chat, onQuery }) {
         setLoading(true)
         setError('')
 
-        const result = chat
-          ? buildChatGraph(chat)
+        const result = chat?.id
+          ? await getConversationGraph(chat.id)
           : await getKnowledgeGraph(500)
 
         if (active) {
@@ -228,6 +230,13 @@ export default function KnowledgeGraph({ chat, onQuery }) {
           <option value="QUERY_ON">Sheet → Query</option>
           <option value="USES_ENTITY">Query → Entity</option>
           <option value="QUERY_RESULT">Query → Result</option>
+          <option value="HAS_MESSAGE">Chat → Message</option>
+          <option value="HAS_QUERY">Chat → SQL query</option>
+          <option value="USES_DATASET">Chat → Sheet</option>
+          <option value="UPLOADS_DATASET">Upload → Sheet</option>
+          <option value="READS_COLUMN">Query → Column</option>
+          <option value="PRODUCED_RESULT">Query → Result</option>
+          <option value="FOLLOWS">Conversation order</option>
         </select>
       </div>
 
@@ -236,6 +245,7 @@ export default function KnowledgeGraph({ chat, onQuery }) {
         <span><i className="kg-dot kg-column-dot" /> Entity</span>
         <span><i className="kg-dot kg-query-dot" /> Query</span>
         <span><i className="kg-dot kg-result-dot" /> Result</span>
+        <span>Messages and SQL history are stored in this chat graph</span>
         <span>Click a node to inspect its details</span>
       </div>
 

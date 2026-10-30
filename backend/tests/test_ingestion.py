@@ -3,6 +3,7 @@ import zipfile
 
 import pandas as pd
 import pytest
+import xlwt
 
 from backend.app.services.ingestion import (
     IngestionError,
@@ -45,6 +46,36 @@ def test_inspect_excel_returns_metadata(tmp_path):
     assert result["row_count"] == 2
     assert result["column_count"] == 2
     assert result["file_type"] == "xlsx"
+
+
+def test_inspect_legacy_xls_returns_metadata(tmp_path):
+    excel_path = tmp_path / "sales.xls"
+    workbook = xlwt.Workbook()
+    worksheet = workbook.add_sheet("Sales")
+    rows = [
+        ["product", "quantity"],
+        ["Laptop", 2],
+        ["Mouse", 5],
+    ]
+    for row_index, row in enumerate(rows):
+        for column_index, value in enumerate(row):
+            worksheet.write(row_index, column_index, value)
+    workbook.save(str(excel_path))
+
+    result = inspect_spreadsheet(excel_path, "sales.xls")
+
+    assert result["row_count"] == 2
+    assert result["column_count"] == 2
+    assert result["file_type"] == "xls"
+    assert result["preview"][0]["product"] == "Laptop"
+
+
+def test_rejects_invalid_xls_content(tmp_path):
+    excel_path = tmp_path / "invalid.xls"
+    excel_path.write_bytes(b"not an XLS workbook")
+
+    with pytest.raises(IngestionError, match="Could not parse the XLS"):
+        inspect_spreadsheet(excel_path, "invalid.xls")
 
 
 def test_rejects_unsupported_file_type(tmp_path):

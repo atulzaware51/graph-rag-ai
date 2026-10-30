@@ -174,3 +174,59 @@ def test_dataset_scope_supports_read_only_ctes(tmp_path):
         allowed_table=allowed_table,
     )
     assert result["rows"] == [{"total": 42}]
+
+
+def test_dataset_scope_allows_only_selected_tables_in_multi_sheet_query(tmp_path):
+    database = tmp_path / "multi-sheet.db"
+    selected_ids = ["c" * 32, "d" * 32]
+    selected_tables = [f"dataset_{dataset_id}" for dataset_id in selected_ids]
+    unselected_table = f"dataset_{'e' * 32}"
+
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "CREATE TABLE datasets (dataset_id TEXT, table_name TEXT)"
+        )
+        for dataset_id, table_name, value in zip(
+            selected_ids,
+            selected_tables,
+            (10, 20),
+        ):
+            connection.execute(
+                f'CREATE TABLE "{table_name}" (amount INTEGER)'
+            )
+            connection.execute(
+                f'INSERT INTO "{table_name}" VALUES (?)',
+                (value,),
+            )
+            connection.execute(
+                "INSERT INTO datasets VALUES (?, ?)",
+                (dataset_id, table_name),
+            )
+        connection.execute(
+            f'CREATE TABLE "{unselected_table}" (amount INTEGER)'
+        )
+        connection.execute(
+            "INSERT INTO datasets VALUES (?, ?)",
+            ("e" * 32, unselected_table),
+        )
+
+    query = (
+        f'SELECT SUM(amount) AS total FROM "{selected_tables[0]}" '
+        f'UNION ALL SELECT SUM(amount) FROM "{selected_tables[1]}"'
+    )
+    result = execute_readonly_sql(
+        query,
+        database,
+        allowed_tables=selected_tables,
+    )
+    assert result["rows"] == [{"total": 10}, {"total": 20}]
+    assert {item["table"] for item in result["read_column_refs"]} == set(
+        selected_tables
+    )
+
+    with pytest.raises(SQLServiceError):
+        execute_readonly_sql(
+            f'SELECT amount FROM "{unselected_table}"',
+            database,
+            allowed_tables=selected_tables,
+        )

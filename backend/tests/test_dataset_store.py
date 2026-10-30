@@ -4,12 +4,21 @@ import sqlite3
 
 import pytest
 from openpyxl import Workbook
+import xlwt
 
 from backend.app.services.dataset_store import (
     DatasetStorageError,
+    delete_spreadsheet,
     get_dataset_chunks,
     store_spreadsheet,
 )
+from backend.app.services.conversation_store import (
+    ConversationStoreError,
+    create_conversation,
+    get_conversation,
+    record_sql,
+)
+from backend.app.services import neo4j_store
 
 
 def test_store_csv_and_metadata(tmp_path):
@@ -94,6 +103,31 @@ def test_content_fingerprint_matches_same_sheet_across_file_formats(tmp_path):
         csv_upload["content_fingerprint"]
         == xlsx_upload["content_fingerprint"]
     )
+
+
+def test_store_legacy_xls_and_metadata(tmp_path):
+    workbook = xlwt.Workbook()
+    worksheet = workbook.add_sheet("Sales")
+    for row_index, row in enumerate(
+        [["Product Name", "Quantity"], ["Laptop", 2], ["Mouse", 5]]
+    ):
+        for column_index, value in enumerate(row):
+            worksheet.write(row_index, column_index, value)
+    xls_path = tmp_path / "sales.xls"
+    workbook.save(str(xls_path))
+
+    result = store_spreadsheet(xls_path, "sales.xls", tmp_path / "test.db")
+
+    assert result["filename"] == "sales.xls"
+    assert result["row_count"] == 2
+    assert result["column_count"] == 2
+    assert result["columns"][0]["sql_name"] == "product_name"
+    with sqlite3.connect(tmp_path / "test.db") as connection:
+        rows = connection.execute(
+            f'SELECT product_name, quantity FROM "{result["table_name"]}" '
+            "ORDER BY rowid"
+        ).fetchall()
+    assert rows == [("Laptop", 2), ("Mouse", 5)]
 
 
 def test_content_fingerprint_changes_when_cell_values_change(tmp_path):
@@ -281,3 +315,156 @@ def test_retrieve_chunks_from_missing_database_raises_error(tmp_path):
             "nonexistent-dataset",
             tmp_path / "missing.db",
         )
+
+
+def test_delete_spreadsheet_removes_dataset_data_and_associated_history(tmp_path):
+    csv_path = tmp_path / "sales.csv"
+    csv_path.write_text(
+        "Product,Quantity\nLaptop,2\n",
+        encoding="utf-8",
+    )
+    database_path = tmp_path / "test.db"
+    stored = store_spreadsheet(
+        csv_path,
+        "sales.csv",
+        database_path,
+        chunks=[
+            {
+                "chunk_id": "sales-chunk",
+                "text": "Laptop has quantity 2.",
+                "metadata": {},
+            }
+        ],
+    )
+    associated_chat = create_conversation(
+        title="Sales query",
+        dataset_id=stored["dataset_id"],
+        database_path=database_path,
+    )
+    metadata_linked_chat = create_conversation(
+        title="Another sales query",
+        database_path=database_path,
+    )
+    unrelated_chat = create_conversation(
+        title="Other dataset",
+        dataset_id="other-dataset",
+        database_path=database_path,
+    )
+    record_sql(
+        metadata_linked_chat["conversation_id"],
+        actor="assistant",
+        sql="SELECT * FROM sales",
+        metadata={"dataset_id": stored["dataset_id"]},
+        database_path=database_path,
+    )
+
+    assert delete_spreadsheet(stored["dataset_id"], database_path)
+    assert not delete_spreadsheet(stored["dataset_id"], database_path)
+
+    with sqlite3.connect(database_path) as connection:
+        remaining_tables = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+        dataset_records = connection.execute(
+            "SELECT COUNT(*) FROM datasets WHERE dataset_id = ?",
+            (stored["dataset_id"],),
+        ).fetchone()[0]
+        chunk_records = connection.execute(
+            "SELECT COUNT(*) FROM document_chunks WHERE dataset_id = ?",
+            (stored["dataset_id"],),
+        ).fetchone()[0]
+
+    assert stored["table_name"] not in remaining_tables
+    assert dataset_records == 0
+    assert chunk_records == 0
+    assert get_conversation(
+        unrelated_chat["conversation_id"],
+        database_path=database_path,
+    )["title"] == "Other dataset"
+    with pytest.raises(ConversationStoreError, match="not found"):
+        get_conversation(
+            associated_chat["conversation_id"],
+            database_path=database_path,
+        )
+    with pytest.raises(ConversationStoreError, match="not found"):
+        get_conversation(
+            metadata_linked_chat["conversation_id"],
+            database_path=database_path,
+        )
+
+
+def test_neo4j_failure_preserves_dataset_sqlite_records(tmp_path, monkeypatch):
+    source = tmp_path / "customers.csv"
+    source.write_text("customer_id,name\n1,Ada\n", encoding="utf-8")
+    database_path = tmp_path / "datasets.db"
+    stored = store_spreadsheet(source, "customers.csv", database_path)
+    failure = neo4j_store.Neo4jStoreError(
+        "Neo4j unavailable.",
+        code="NEO4J_UNAVAILABLE",
+    )
+    monkeypatch.setattr(neo4j_store, "is_configured", lambda: True)
+    monkeypatch.setattr(
+        neo4j_store,
+        "sync_graph",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(failure),
+    )
+
+    with pytest.raises(neo4j_store.Neo4jStoreError):
+        delete_spreadsheet(stored["dataset_id"], database_path)
+
+    with sqlite3.connect(database_path) as connection:
+        dataset = connection.execute(
+            "SELECT table_name FROM datasets WHERE dataset_id = ?",
+            (stored["dataset_id"],),
+        ).fetchone()
+        table_exists = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+            (stored["table_name"],),
+        ).fetchone()
+    assert dataset == (stored["table_name"],)
+    assert table_exists is not None
+
+
+def test_graph_scope_delete_failure_preserves_dataset_and_skips_graph_sync(
+    tmp_path,
+    monkeypatch,
+):
+    source = tmp_path / "customers.csv"
+    source.write_text("customer_id,name\n1,Ada\n", encoding="utf-8")
+    database_path = tmp_path / "datasets.db"
+    stored = store_spreadsheet(source, "customers.csv", database_path)
+    failure = neo4j_store.Neo4jStoreError(
+        "Neo4j unavailable.",
+        code="NEO4J_UNAVAILABLE",
+    )
+    sync_calls = []
+    monkeypatch.setattr(neo4j_store, "is_configured", lambda: True)
+    monkeypatch.setattr(
+        neo4j_store,
+        "delete_graphs",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(failure),
+    )
+    monkeypatch.setattr(
+        neo4j_store,
+        "sync_graph",
+        lambda *args, **kwargs: sync_calls.append((args, kwargs)),
+    )
+
+    with pytest.raises(neo4j_store.Neo4jStoreError):
+        delete_spreadsheet(stored["dataset_id"], database_path)
+
+    assert sync_calls == []
+    with sqlite3.connect(database_path) as connection:
+        dataset = connection.execute(
+            "SELECT table_name FROM datasets WHERE dataset_id = ?",
+            (stored["dataset_id"],),
+        ).fetchone()
+        table_exists = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+            (stored["table_name"],),
+        ).fetchone()
+    assert dataset == (stored["table_name"],)
+    assert table_exists is not None

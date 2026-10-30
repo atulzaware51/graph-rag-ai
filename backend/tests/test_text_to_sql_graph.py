@@ -54,6 +54,30 @@ def test_valid_question_executes_sql_service(monkeypatch):
     assert result["result"]["result"]["rows"][0]["count"] == 2
 
 
+def test_selected_graph_context_is_forwarded_to_sql_service(monkeypatch):
+    graph_context = {"candidate_relationships": [{"status": "candidate"}]}
+    captured = {}
+
+    def fake_ask_with_sql(**kwargs):
+        captured.update(kwargs)
+        return {"status": "success", "sql": "SELECT 1"}
+
+    monkeypatch.setattr(
+        graph_service,
+        "ask_with_sql",
+        fake_ask_with_sql,
+    )
+
+    result = graph_service.ask_with_sql_graph(
+        "Count rows",
+        "a" * 32,
+        graph_context=graph_context,
+    )
+
+    assert result["status"] == "success"
+    assert captured["graph_context"] == graph_context
+
+
 def test_unexpected_sql_service_error_is_sanitized(monkeypatch):
     def fake_ask_with_sql(question, dataset_id):
         raise RuntimeError("Simulated SQL failure")

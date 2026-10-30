@@ -33,8 +33,9 @@ def execute_readonly_sql(
     query: str,
     database_path: str | Path = DEFAULT_DATABASE,
     allowed_table: str | None = None,
+    allowed_tables: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Execute one bounded read-only SELECT, optionally restricted to one table."""
+    """Execute one bounded read-only SELECT, optionally restricted to datasets."""
 
     if not isinstance(query, str) or not query.strip():
         raise ValueError("SQL query must not be empty.")
@@ -46,12 +47,19 @@ def execute_readonly_sql(
     if not re.match(r"^(SELECT|WITH)\b", sql, re.IGNORECASE):
         raise SQLServiceError("Only SELECT or WITH queries are allowed.")
 
-    dataset_id = None
+    scoped_tables = list(dict.fromkeys(allowed_tables or []))
     if allowed_table is not None:
-        match = re.fullmatch(r"dataset_([a-fA-F0-9]{32})", allowed_table)
+        if scoped_tables:
+            raise SQLServiceError("Specify either allowed_table or allowed_tables.")
+        scoped_tables = [allowed_table]
+    if allowed_tables is not None and not scoped_tables:
+        raise SQLServiceError("At least one allowed dataset table is required.")
+    dataset_ids: list[str] = []
+    for table in scoped_tables:
+        match = re.fullmatch(r"dataset_([a-fA-F0-9]{32})", table)
         if match is None:
             raise SQLServiceError("Invalid dataset table name.")
-        dataset_id = match.group(1)
+        dataset_ids.append(match.group(1))
 
     database = Path(database_path)
     if not database.is_file():
@@ -76,18 +84,20 @@ def execute_readonly_sql(
         )
         connection.row_factory = sqlite3.Row
 
-        if allowed_table is not None:
-            registered = connection.execute(
-                """
-                SELECT 1
-                FROM datasets
-                WHERE dataset_id = ? AND table_name = ?
-                """,
-                (dataset_id, allowed_table),
-            ).fetchone()
-            if registered is None:
+        if scoped_tables:
+            placeholders = ", ".join("?" for _ in scoped_tables)
+            registered_rows = connection.execute(
+                "SELECT dataset_id, table_name FROM datasets "
+                f"WHERE table_name IN ({placeholders})",
+                tuple(scoped_tables),
+            ).fetchall()
+            registered = {
+                (row["dataset_id"], row["table_name"])
+                for row in registered_rows
+            }
+            if registered != set(zip(dataset_ids, scoped_tables)):
                 raise SQLServiceError(
-                    "Dataset table was not found in the dataset registry."
+                    "One or more selected dataset tables were not found in the dataset registry."
                 )
 
         allowed_actions = {
@@ -96,6 +106,7 @@ def execute_readonly_sql(
             sqlite3.SQLITE_FUNCTION,
         }
         read_columns: list[str] = []
+        read_column_refs: list[dict[str, str]] = []
         recursive_action = getattr(sqlite3, "SQLITE_RECURSIVE", None)
         if recursive_action is not None:
             allowed_actions.add(recursive_action)
@@ -120,9 +131,9 @@ def execute_readonly_sql(
 
             if (
                 action == sqlite3.SQLITE_READ
-                and allowed_table is not None
+                and scoped_tables
                 and (
-                    arg1 != allowed_table
+                    arg1 not in scoped_tables
                     or database_name != "main"
                 )
             ):
@@ -134,6 +145,16 @@ def execute_readonly_sql(
                 and arg2 not in read_columns
             ):
                 read_columns.append(arg2)
+            if (
+                action == sqlite3.SQLITE_READ
+                and arg1 in scoped_tables
+                and arg2
+                and not any(
+                    item["table"] == arg1 and item["column"] == arg2
+                    for item in read_column_refs
+                )
+            ):
+                read_column_refs.append({"table": arg1, "column": arg2})
 
             return sqlite3.SQLITE_OK
 
@@ -176,6 +197,7 @@ def execute_readonly_sql(
             "row_count": len(rows),
             "rows": rows,
             "read_columns": read_columns,
+            "read_column_refs": read_column_refs,
         }
 
     except SQLServiceError:
