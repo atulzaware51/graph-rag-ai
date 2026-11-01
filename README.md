@@ -19,6 +19,7 @@ GraphSheet AI is a spreadsheet analysis application built with FastAPI, SQLite o
 - Use the framework-free web interface at `/app/` or the OpenAPI interface at `/docs`.
 
 ## Architecture and limitations
+<img width="3644" height="4228" alt="image" src="https://github.com/user-attachments/assets/3b0fbdc7-8585-4a49-96f0-cce22d390a4f" />
 
 - FastAPI routes are in `backend/app/api/`; persistence, ingestion, retrieval, profiling, SQL, and graph logic are in `backend/app/services/`.
 - SQLite creates its metadata tables when the first dataset is stored. The default database path is `data/graphsheet.db`; run commands from the repository root.
