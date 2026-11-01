@@ -30,6 +30,8 @@ GraphSheet AI is a spreadsheet analysis application built with FastAPI, SQLite o
 - Relationships are heuristic **candidates**, not verified foreign keys or approved relationships. They require matching names and overlapping values.
 - Schema profiling computes per-column distinct counts; large/complex datasets may take time even within the upload limits.
 - There is no authentication, authorization, or multi-user isolation. Run locally and do not expose the development server to an untrusted network.
+## WORKING OF THE PROJECT S
+<img width="8228" height="10656" alt="image" src="https://github.com/user-attachments/assets/7b5b0579-8265-4173-97ad-787c901ebc04" />
 
 ## Windows PowerShell setup
 
