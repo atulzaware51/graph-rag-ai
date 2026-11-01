@@ -1,7 +1,5 @@
 """API endpoints for the GraphSheet AI knowledge graph."""
 
-import logging
-
 # Import APIRouter to group related endpoints, HTTPException to handle API errors, 
 # and Query to add validation and default values to URL query parameters.
 from fastapi import APIRouter, HTTPException, Query
@@ -11,16 +9,8 @@ from backend.app.services.graph_service import (
     GraphServiceError,          # Custom error raised when graph construction fails
     build_graph_from_database,  # Function that fetches data and constructs the graph dictionary
 )
-from backend.app.services.neo4j_store import (
-    Neo4jStoreError,
-    get_graph,
-    graph_store_status,
-    is_configured,
-    sync_graph,
-)
 # Instantiate a FastAPI router with a common URL prefix '/graph' and tag for API documentation.
 router = APIRouter(prefix="/graph", tags=["Knowledge Graph"])
-logger = logging.getLogger(__name__)
 
 
 # Define an HTTP GET route at the root path of this router (accessible via GET /graph/).
@@ -35,22 +25,7 @@ def get_knowledge_graph(
     try:
         # Fetch and build the complete knowledge graph structure from the underlying database.
         graph = build_graph_from_database()
-        if is_configured():
-            try:
-                sync_graph("dataset-schema", graph)
-                graph = {
-                    **graph,
-                    **get_graph("dataset-schema"),
-                    "graph_store": "neo4j",
-                }
-            except Neo4jStoreError as exc:
-                logger.warning(
-                    "Neo4j graph unavailable; serving SQLite graph (%s).",
-                    exc.code,
-                )
-                graph["graph_store"] = "sqlite"
-        else:
-            graph["graph_store"] = graph_store_status()
+        graph.setdefault("graph_store", "sqlite")
 
         # Slice the 'nodes' array to contain at most 'limit' items to keep response sizes manageable.
         graph["nodes"] = graph["nodes"][:limit]

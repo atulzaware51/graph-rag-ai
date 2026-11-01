@@ -4,15 +4,33 @@ from __future__ import annotations
 
 import json
 import logging
+import random
 import sqlite3
+import threading
+import time
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
+from functools import wraps
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Generator, TypeVar
+
+from backend.app.core.database import (
+    database_url_for_path,
+    initialize_database,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_DATABASE = PROJECT_ROOT / "data" / "graphsheet.db"
 logger = logging.getLogger(__name__)
+SQLITE_TIMEOUT_SECONDS = 5
+SQLITE_BUSY_TIMEOUT_MS = SQLITE_TIMEOUT_SECONDS * 1000
+SQLITE_WRITE_RETRIES = 3
+_WAL_DATABASES: set[Path] = set()
+_WAL_LOCK = threading.Lock()
+_SCHEMA_DATABASES: set[Path] = set()
+_SCHEMA_LOCK = threading.RLock()
+_WriteResult = TypeVar("_WriteResult")
 
 
 class ConversationStoreError(RuntimeError):
@@ -28,6 +46,99 @@ class ConversationStoreError(RuntimeError):
         super().__init__(message)
         self.code = code
         self.retry_after_seconds = retry_after_seconds
+
+
+@contextmanager
+def _connection(
+    database_path: str | Path,
+    *,
+    immediate: bool = False,
+) -> Generator[sqlite3.Connection, None, None]:
+    """Open, transact, and always close a SQLite connection."""
+    connection = sqlite3.connect(
+        database_path,
+        timeout=SQLITE_TIMEOUT_SECONDS,
+    )
+    connection.row_factory = sqlite3.Row
+    try:
+        connection.execute(f"PRAGMA busy_timeout = {SQLITE_BUSY_TIMEOUT_MS}")
+        connection.execute("PRAGMA foreign_keys = ON")
+        if immediate:
+            connection.execute("BEGIN IMMEDIATE")
+        yield connection
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
+
+
+def _enable_wal(database_path: str | Path) -> None:
+    """Enable WAL once per local database to reduce reader/writer contention."""
+    database = Path(database_path).resolve()
+    with _WAL_LOCK:
+        if database in _WAL_DATABASES:
+            return
+        connection = sqlite3.connect(
+            database,
+            timeout=SQLITE_TIMEOUT_SECONDS,
+        )
+        try:
+            connection.execute(f"PRAGMA busy_timeout = {SQLITE_BUSY_TIMEOUT_MS}")
+            journal_mode = connection.execute(
+                "PRAGMA journal_mode = WAL"
+            ).fetchone()[0]
+            if str(journal_mode).lower() != "wal":
+                raise ConversationStoreError(
+                    "Could not enable SQLite WAL mode for conversation storage.",
+                    code="CONVERSATION_STORAGE_CONFIGURATION",
+                )
+            _WAL_DATABASES.add(database)
+        except sqlite3.Error as exc:
+            raise ConversationStoreError(
+                "Could not configure SQLite conversation storage.",
+                code="CONVERSATION_STORAGE_CONFIGURATION",
+            ) from exc
+        finally:
+            connection.close()
+
+
+def _retry_locked_writes(
+    function: Callable[..., _WriteResult],
+) -> Callable[..., _WriteResult]:
+    """Retry a complete, rolled-back write only when SQLite reports lock contention."""
+    @wraps(function)
+    def wrapped(*args: Any, **kwargs: Any) -> _WriteResult:
+        for attempt in range(SQLITE_WRITE_RETRIES + 1):
+            try:
+                return function(*args, **kwargs)
+            except sqlite3.OperationalError as exc:
+                locked = "locked" in str(exc).casefold() or "busy" in str(exc).casefold()
+                if not locked:
+                    raise ConversationStoreError(
+                        "Could not save the conversation event.",
+                        code="CONVERSATION_WRITE_FAILED",
+                    ) from exc
+                if attempt == SQLITE_WRITE_RETRIES:
+                    raise ConversationStoreError(
+                        "Conversation storage is busy. Please retry shortly.",
+                        code="SQLITE_BUSY",
+                        retry_after_seconds=2,
+                    ) from exc
+                delay = min(0.05 * (2**attempt), 0.4)
+                time.sleep(random.uniform(delay * 0.75, delay * 1.25))
+            except sqlite3.Error as exc:
+                raise ConversationStoreError(
+                    "Could not save the conversation event.",
+                    code="CONVERSATION_WRITE_FAILED",
+                ) from exc
+        raise ConversationStoreError(
+            "Could not save the conversation event.",
+            code="CONVERSATION_WRITE_FAILED",
+        )
+
+    return wrapped
 
 
 def _sync_neo4j_graph(conversation_id: str, database_path: str | Path) -> None:
@@ -56,12 +167,23 @@ def _utc_timestamp() -> str:
 
 
 def _ensure_tables(database_path: str | Path) -> None:
+    """Initialize a conversation database once per process."""
+    database = Path(database_path).resolve()
+    with _SCHEMA_LOCK:
+        if database in _SCHEMA_DATABASES:
+            return
+        _initialize_tables(database)
+        _SCHEMA_DATABASES.add(database)
+
+
+def _initialize_tables(database_path: str | Path) -> None:
     """Create the conversation tables if they do not already exist."""
     database = Path(database_path)
     database.parent.mkdir(parents=True, exist_ok=True)
+    _enable_wal(database)
+    initialize_database(database_url_for_path(database))
 
-    with sqlite3.connect(database) as connection:
-        connection.row_factory = sqlite3.Row
+    with _connection(database, immediate=True) as connection:
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS conversations (
@@ -87,10 +209,28 @@ def _ensure_tables(database_path: str | Path) -> None:
                 result_reference TEXT,
                 created_at TEXT NOT NULL,
                 event_order INTEGER NOT NULL,
+                idempotency_key TEXT,
                 FOREIGN KEY (conversation_id)
                     REFERENCES conversations(conversation_id)
                     ON DELETE CASCADE
             )
+            """
+        )
+        event_columns = {
+            row["name"]
+            for row in connection.execute(
+                "PRAGMA table_info(conversation_events)"
+            )
+        }
+        if "idempotency_key" not in event_columns:
+            connection.execute(
+                "ALTER TABLE conversation_events ADD COLUMN idempotency_key TEXT"
+            )
+        connection.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_conversation_events_idempotency
+            ON conversation_events (conversation_id, idempotency_key)
+            WHERE idempotency_key IS NOT NULL
             """
         )
         connection.execute(
@@ -127,7 +267,7 @@ def _ensure_tables(database_path: str | Path) -> None:
             )
         connection.execute(
             """
-            CREATE TABLE IF NOT EXISTS graph_nodes (
+            CREATE TABLE IF NOT EXISTS conversation_graph_nodes (
                 node_id TEXT PRIMARY KEY,
                 conversation_id TEXT NOT NULL,
                 node_type TEXT NOT NULL,
@@ -142,13 +282,13 @@ def _ensure_tables(database_path: str | Path) -> None:
         )
         connection.execute(
             """
-            CREATE INDEX IF NOT EXISTS idx_graph_nodes_conversation
-            ON graph_nodes (conversation_id, node_type)
+            CREATE INDEX IF NOT EXISTS idx_conversation_graph_nodes_conversation
+            ON conversation_graph_nodes (conversation_id, node_type)
             """
         )
         connection.execute(
             """
-            CREATE TABLE IF NOT EXISTS graph_edges (
+            CREATE TABLE IF NOT EXISTS conversation_graph_edges (
                 edge_id TEXT PRIMARY KEY,
                 conversation_id TEXT NOT NULL,
                 source_id TEXT NOT NULL,
@@ -160,18 +300,18 @@ def _ensure_tables(database_path: str | Path) -> None:
                     REFERENCES conversations(conversation_id)
                     ON DELETE CASCADE,
                 FOREIGN KEY (source_id)
-                    REFERENCES graph_nodes(node_id)
+                    REFERENCES conversation_graph_nodes(node_id)
                     ON DELETE CASCADE,
                 FOREIGN KEY (target_id)
-                    REFERENCES graph_nodes(node_id)
+                    REFERENCES conversation_graph_nodes(node_id)
                     ON DELETE CASCADE
             )
             """
         )
         connection.execute(
             """
-            CREATE INDEX IF NOT EXISTS idx_graph_edges_conversation
-            ON graph_edges (conversation_id, relationship)
+            CREATE INDEX IF NOT EXISTS idx_conversation_graph_edges_conversation
+            ON conversation_graph_edges (conversation_id, relationship)
             """
         )
 
@@ -188,7 +328,7 @@ def _upsert_graph_node(
 ) -> None:
     connection.execute(
         """
-        INSERT INTO graph_nodes (
+        INSERT INTO conversation_graph_nodes (
             node_id, conversation_id, node_type, label, properties_json, created_at
         ) VALUES (?, ?, ?, ?, ?, ?)
         ON CONFLICT(node_id) DO UPDATE SET
@@ -219,7 +359,7 @@ def _upsert_graph_edge(
 ) -> None:
     connection.execute(
         """
-        INSERT INTO graph_edges (
+        INSERT INTO conversation_graph_edges (
             edge_id, conversation_id, source_id, target_id,
             relationship, properties_json, created_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -267,7 +407,7 @@ def _write_selected_datasets(
     chat_node_id = f"chat:{conversation_id}"
     connection.execute(
         """
-        DELETE FROM graph_edges
+        DELETE FROM conversation_graph_edges
         WHERE conversation_id = ? AND relationship = 'USES_DATASET'
         """,
         (conversation_id,),
@@ -378,7 +518,7 @@ def validate_dataset_ids(
 
     database = Path(database_path)
     try:
-        with sqlite3.connect(database) as connection:
+        with _connection(database) as connection:
             registered_tables = {
                 row[0]
                 for row in connection.execute(
@@ -419,7 +559,7 @@ def set_conversation_datasets(
     _ensure_tables(database_path)
     timestamp = _utc_timestamp()
 
-    with sqlite3.connect(database_path) as connection:
+    with _connection(database_path, immediate=True) as connection:
         connection.execute("PRAGMA foreign_keys = ON")
         connection.row_factory = sqlite3.Row
         exists = connection.execute(
@@ -524,7 +664,7 @@ def create_conversation(
             raise ValueError("Conversation ID must be a valid UUID.") from exc
         existing = None
         if database.is_file():
-            with sqlite3.connect(database) as connection:
+            with _connection(database) as connection:
                 existing = connection.execute(
                     """
                     SELECT 1 FROM conversations WHERE conversation_id = ?
@@ -538,7 +678,7 @@ def create_conversation(
 
     timestamp = _utc_timestamp()
 
-    with sqlite3.connect(database) as connection:
+    with _connection(database, immediate=True) as connection:
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
         connection.execute(
@@ -596,7 +736,7 @@ def list_conversations(
     database = Path(database_path)
     _ensure_tables(database)
 
-    with sqlite3.connect(database) as connection:
+    with _connection(database) as connection:
         connection.row_factory = sqlite3.Row
         rows = connection.execute(
             """
@@ -629,7 +769,7 @@ def get_conversation(
     database = Path(database_path)
     _ensure_tables(database)
 
-    with sqlite3.connect(database) as connection:
+    with _connection(database) as connection:
         connection.row_factory = sqlite3.Row
         conversation = connection.execute(
             """
@@ -670,6 +810,7 @@ def get_conversation(
     return result
 
 
+@_retry_locked_writes
 def record_event(
     conversation_id: str,
     event_type: str,
@@ -678,6 +819,7 @@ def record_event(
     message: str | None = None,
     metadata: dict[str, Any] | None = None,
     result_reference: str | None = None,
+    idempotency_key: str | None = None,
     database_path: str | Path = DEFAULT_DATABASE,
 ) -> dict[str, Any]:
     """Persist a single conversation event."""
@@ -689,12 +831,58 @@ def record_event(
 
     if not isinstance(actor, str) or not actor.strip():
         raise ValueError("Actor must not be empty.")
+    if idempotency_key is not None and (
+        not isinstance(idempotency_key, str)
+        or not idempotency_key.strip()
+        or len(idempotency_key) > 200
+    ):
+        raise ValueError(
+            "Idempotency key must be a non-empty string of at most 200 characters."
+        )
 
     database = Path(database_path)
     _ensure_tables(database)
 
-    with sqlite3.connect(database) as connection:
-        connection.row_factory = sqlite3.Row
+    with _connection(database, immediate=True) as connection:
+        metadata_payload: dict[str, Any] = dict(metadata or {})
+        if result_reference is not None:
+            metadata_payload.setdefault("result_reference", result_reference)
+        if result_reference is not None and message is None:
+            message = f"result:{result_reference}"
+        metadata_json = (
+            json.dumps(
+                metadata_payload,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            if metadata_payload
+            else None
+        )
+
+        if idempotency_key is not None:
+            existing = connection.execute(
+                """
+                SELECT event_id, conversation_id, event_type, actor, message,
+                       metadata_json, result_reference, created_at, event_order
+                FROM conversation_events
+                WHERE conversation_id = ? AND idempotency_key = ?
+                """,
+                (conversation_id, idempotency_key),
+            ).fetchone()
+            if existing is not None:
+                if (
+                    existing["event_type"] != event_type
+                    or existing["actor"] != actor
+                    or existing["message"] != message
+                    or existing["metadata_json"] != metadata_json
+                    or existing["result_reference"] != result_reference
+                ):
+                    raise ConversationStoreError(
+                        "This idempotency key was already used for a different event.",
+                        code="IDEMPOTENCY_CONFLICT",
+                    )
+                return _event_from_row(existing)
+
         exists = connection.execute(
             "SELECT 1 FROM conversations WHERE conversation_id = ?",
             (conversation_id,),
@@ -702,12 +890,6 @@ def record_event(
 
         if exists is None:
             raise ConversationStoreError("Conversation not found.")
-
-        metadata_payload: dict[str, Any] = dict(metadata or {})
-        if result_reference is not None:
-            metadata_payload.setdefault("result_reference", result_reference)
-        if result_reference is not None and message is None:
-            message = f"result:{result_reference}"
 
         event_order = connection.execute(
             """
@@ -746,8 +928,9 @@ def record_event(
                 metadata_json,
                 result_reference,
                 created_at,
-                event_order
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                event_order,
+                idempotency_key
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 event_id,
@@ -755,12 +938,11 @@ def record_event(
                 event_type,
                 actor,
                 message,
-                json.dumps(metadata_payload, ensure_ascii=False, separators=(",", ":"))
-                if metadata_payload
-                else None,
+                metadata_json,
                 result_reference,
                 created_at,
                 event_order,
+                idempotency_key,
             ),
         )
 
@@ -939,7 +1121,7 @@ def record_event(
                         f"{selected_dataset_id}:{column_name}"
                     )
                     existing_column = connection.execute(
-                        "SELECT 1 FROM graph_nodes WHERE node_id = ?",
+                        "SELECT 1 FROM conversation_graph_nodes WHERE node_id = ?",
                         (column_node_id,),
                     ).fetchone()
                     if existing_column is None:
@@ -1014,7 +1196,7 @@ def record_event(
         if isinstance(query_id, str):
             query_node_id = f"event:{query_id}"
             query_exists = connection.execute(
-                "SELECT 1 FROM graph_nodes WHERE node_id = ?",
+                "SELECT 1 FROM conversation_graph_nodes WHERE node_id = ?",
                 (query_node_id,),
             ).fetchone()
             if query_exists is not None and event_type in {
@@ -1035,7 +1217,6 @@ def record_event(
                     created_at=created_at,
                 )
 
-    _sync_neo4j_graph(conversation_id, database)
     return {
         "event_id": event_id,
         "conversation_id": conversation_id,
@@ -1093,8 +1274,7 @@ def _get_sqlite_conversation_graph(
     database = Path(database_path)
     _ensure_tables(database)
 
-    with sqlite3.connect(database) as connection:
-        connection.row_factory = sqlite3.Row
+    with _connection(database_path) as connection:
         exists = connection.execute(
             "SELECT 1 FROM conversations WHERE conversation_id = ?",
             (conversation_id,),
@@ -1105,7 +1285,7 @@ def _get_sqlite_conversation_graph(
         node_rows = connection.execute(
             """
             SELECT node_id, node_type, label, properties_json, created_at
-            FROM graph_nodes
+            FROM conversation_graph_nodes
             WHERE conversation_id = ?
             ORDER BY created_at, node_id
             """,
@@ -1114,7 +1294,7 @@ def _get_sqlite_conversation_graph(
         edge_rows = connection.execute(
             """
             SELECT edge_id, source_id, target_id, relationship, properties_json
-            FROM graph_edges
+            FROM conversation_graph_edges
             WHERE conversation_id = ?
             ORDER BY created_at, edge_id
             """,
@@ -1153,7 +1333,7 @@ def delete_conversation(
 ) -> bool:
     """Delete one conversation and its graph nodes and edges."""
     _ensure_tables(database_path)
-    with sqlite3.connect(database_path) as connection:
+    with _connection(database_path) as connection:
         exists = connection.execute(
             "SELECT 1 FROM conversations WHERE conversation_id = ?",
             (conversation_id,),
@@ -1177,8 +1357,7 @@ def delete_conversation(
             retry_after_seconds=exc.retry_after_seconds,
         ) from exc
 
-    with sqlite3.connect(database_path) as connection:
-        connection.execute("PRAGMA foreign_keys = ON")
+    with _connection(database_path, immediate=True) as connection:
         cursor = connection.execute(
             "DELETE FROM conversations WHERE conversation_id = ?",
             (conversation_id,),
@@ -1187,12 +1366,34 @@ def delete_conversation(
     return deleted
 
 
+def get_event_by_idempotency_key(
+    conversation_id: str,
+    idempotency_key: str,
+    database_path: str | Path = DEFAULT_DATABASE,
+) -> dict[str, Any] | None:
+    """Return a previously committed event for a request idempotency key."""
+    database = Path(database_path)
+    _ensure_tables(database)
+    with _connection(database) as connection:
+        row = connection.execute(
+            """
+            SELECT event_id, conversation_id, event_type, actor, message,
+                   metadata_json, result_reference, created_at, event_order
+            FROM conversation_events
+            WHERE conversation_id = ? AND idempotency_key = ?
+            """,
+            (conversation_id, idempotency_key),
+        ).fetchone()
+    return _event_from_row(row) if row is not None else None
+
+
 def record_message(
     conversation_id: str,
     *,
     actor: str,
     message: str,
     metadata: dict[str, Any] | None = None,
+    idempotency_key: str | None = None,
     database_path: str | Path = DEFAULT_DATABASE,
 ) -> dict[str, Any]:
     """Persist a user or assistant message event."""
@@ -1202,6 +1403,7 @@ def record_message(
         actor=actor,
         message=message,
         metadata=metadata,
+        idempotency_key=idempotency_key,
         database_path=database_path,
     )
 

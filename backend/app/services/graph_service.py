@@ -1,7 +1,6 @@
 
 """Integrate stored datasets and inferred relationships into a graph."""
 
-import logging
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +18,15 @@ from backend.app.services.graph_builder import (
     GraphBuilderError,
     build_knowledge_graph,
 )
+from backend.app.core.database import (
+    get_database_engine,
+    graph_database_url_for_source,
+)
+from backend.app.services.graph_store import (
+    GraphPersistenceError,
+    get_persisted_graph,
+    replace_graph,
+)
 from backend.app.services.relationship_inference import (
     RelationshipInferenceError,
     infer_relationships,
@@ -30,7 +38,6 @@ from backend.app.services.schema_profiler import (
 
 
 DEFAULT_DATABASE_PATH = Path("data/graphsheet.db")
-logger = logging.getLogger(__name__)
 
 
 class GraphServiceError(Exception):
@@ -49,82 +56,18 @@ class GraphServiceError(Exception):
 
 
 def build_graph_for_scope(
-    scope_id: str,
+    _scope_id: str,
     dataset_ids: list[str],
     *,
     include_evidence: bool = False,
     database_path: str | Path = DEFAULT_DATABASE_PATH,
 ) -> dict[str, Any]:
-    """Build from SQLite, using Neo4j as an optional graph projection."""
-    graph = build_graph_from_database(
+    """Return a selected graph after rebuilding its persistent database records."""
+    return build_graph_from_database(
         database_path,
         dataset_ids=dataset_ids,
         include_evidence=include_evidence,
     )
-    from backend.app.services.neo4j_store import (
-        Neo4jStoreError,
-        get_graph,
-        is_configured,
-        sync_graph,
-    )
-
-    if not is_configured():
-        return graph
-
-    try:
-        sync_graph(scope_id, graph)
-        persisted_graph = get_graph(scope_id)
-    except Neo4jStoreError as exc:
-        logger.warning(
-            "Neo4j graph unavailable; serving SQLite graph (%s).",
-            exc.code,
-        )
-        return {**graph, "graph_store": "sqlite"}
-
-    node_by_id = {
-        node["id"]: node
-        for node in persisted_graph.get("nodes", [])
-        if node.get("type") == "Column"
-    }
-    dataset_by_id = {
-        node.get("dataset_id"): node
-        for node in persisted_graph.get("nodes", [])
-        if node.get("type") == "Dataset"
-    }
-    persisted_graph["candidate_relationships"] = [
-        {
-            "left": {
-                "dataset_id": left["dataset_id"],
-                "column": left["sql_name"],
-                "filename": dataset_by_id.get(
-                    left["dataset_id"], {}
-                ).get("filename"),
-                "table_name": dataset_by_id.get(
-                    left["dataset_id"], {}
-                ).get("table_name"),
-            },
-            "right": {
-                "dataset_id": right["dataset_id"],
-                "column": right["sql_name"],
-                "filename": dataset_by_id.get(
-                    right["dataset_id"], {}
-                ).get("filename"),
-                "table_name": dataset_by_id.get(
-                    right["dataset_id"], {}
-                ).get("table_name"),
-            },
-            **{
-                key: value
-                for key, value in edge.items()
-                if key not in {"id", "source", "target", "type"}
-            },
-        }
-        for edge in persisted_graph.get("edges", [])
-        if edge.get("type") in {"CANDIDATE_MATCH", "RELATED_TO"}
-        and (left := node_by_id.get(edge.get("source"))) is not None
-        and (right := node_by_id.get(edge.get("target"))) is not None
-    ]
-    return {**persisted_graph, "graph_store": "neo4j"}
 
 
 def build_graph_from_database(
@@ -239,27 +182,61 @@ def build_graph_from_database(
         relationships = inference.get("relationships", [])
 
         evidence: list[dict[str, Any]] = []
-        if include_evidence:
-            for dataset in graph_datasets:
-                evidence.extend(
-                    get_dataset_chunks(
-                        dataset["dataset_id"],
-                        database_path=database,
-                    )
+        for dataset in graph_datasets:
+            evidence.extend(
+                get_dataset_chunks(
+                    dataset["dataset_id"],
+                    database_path=database,
                 )
+            )
 
         graph = build_knowledge_graph(
             datasets=graph_datasets,
             relationships=relationships,
             evidence=evidence,
         )
+        selected_dataset_ids = [
+            dataset["dataset_id"] for dataset in graph_datasets
+        ]
+        replace_graph(
+            graph,
+            selected_dataset_ids,
+            database_url=graph_database_url_for_source(database),
+        )
+        persisted_graph = get_persisted_graph(
+            dataset_ids=selected_dataset_ids,
+            database_url=graph_database_url_for_source(database),
+        )
+        graph_nodes = persisted_graph["nodes"]
+        graph_edges = persisted_graph["edges"]
+        if not include_evidence:
+            visible_node_ids = {
+                node["id"]
+                for node in graph_nodes
+                if node["type"] != "Evidence"
+            }
+            graph_nodes = [
+                node for node in graph_nodes
+                if node["id"] in visible_node_ids
+            ]
+            graph_edges = [
+                edge for edge in graph_edges
+                if edge["source"] in visible_node_ids
+                and edge["target"] in visible_node_ids
+            ]
 
         return {
             "status": "success",
             "dataset_count": len(graph_datasets),
             "relationship_candidate_count": len(relationships),
             "candidate_relationships": relationships,
-            **graph,
+            "node_count": len(graph_nodes),
+            "edge_count": len(graph_edges),
+            "nodes": graph_nodes,
+            "edges": graph_edges,
+            "graph_store": get_database_engine(
+                graph_database_url_for_source(database)
+            ).dialect.name,
         }
 
     except (
@@ -269,6 +246,7 @@ def build_graph_from_database(
         SchemaProfilerError,
         RelationshipInferenceError,
         GraphBuilderError,
+        GraphPersistenceError,
     ) as exc:
         raise GraphServiceError(
             f"Could not build knowledge graph: {exc}"

@@ -141,13 +141,15 @@ def test_ask_sql_rejected_query(monkeypatch):
 
 
 
-def test_ask_sql_missing_gemini_configuration(monkeypatch):
-    """Missing Gemini configuration returns a server error."""
+def test_ask_sql_missing_provider_configuration(monkeypatch):
+    """Missing LLM provider configuration returns a server error."""
 
     def fake_ask_with_sql_graph(question, dataset_id, graph_context=None):
         return {
             "status": "error",
-            "error": "GEMINI_API_KEY is not configured.",
+            "error": "No configured LLM API key was found.",
+            "error_code": "LLM_PROVIDER_NOT_CONFIGURED",
+            "retryable": False,
         }
 
     monkeypatch.setattr(
@@ -165,6 +167,31 @@ def test_ask_sql_missing_gemini_configuration(monkeypatch):
     assert response.json()["detail"] == (
         "Text-to-SQL service is not configured."
     )
+
+
+def test_ask_sql_provider_exhaustion_is_structured_and_retryable(monkeypatch):
+    monkeypatch.setattr(
+        datasets_api,
+        "ask_with_sql_graph",
+        lambda **_kwargs: {
+            "status": "error",
+            "error": "Configured LLM providers are temporarily unavailable.",
+            "error_code": "LLM_PROVIDERS_UNAVAILABLE",
+            "retryable": True,
+        },
+    )
+
+    response = client.post(
+        f"/datasets/{VALID_DATASET_ID}/ask-sql",
+        json={"question": "Count rows"},
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == {
+        "code": "LLM_PROVIDERS_UNAVAILABLE",
+        "message": "Configured LLM providers are temporarily unavailable.",
+        "retryable": True,
+    }
 
 
 def test_ask_sql_malformed_workflow_response(monkeypatch):

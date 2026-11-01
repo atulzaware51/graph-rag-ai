@@ -64,22 +64,11 @@ def test_database(tmp_path, monkeypatch):
 
 
 def mock_langchain(monkeypatch, sql):
-    """Replace Gemini's LangChain wrapper with a local fake model."""
-
-    class FakeResponse:
-        content = sql
-
-    class FakeLLM:
-        def __init__(self, **kwargs):
-            self.config = kwargs
-
-        def invoke(self, messages):
-            return FakeResponse()
-
+    """Replace provider generation with a local SQL response."""
     monkeypatch.setattr(
         service,
-        "ChatGoogleGenerativeAI",
-        FakeLLM,
+        "generate_text",
+        lambda **_kwargs: (sql, "gemini"),
     )
 
     monkeypatch.setattr(
@@ -128,11 +117,12 @@ def test_invalid_dataset_id_lists_are_rejected(dataset_ids):
 
 
 def test_missing_api_key_is_rejected(test_database, monkeypatch):
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    for key in ("GEMINI_API_KEY", "GROQ_API_KEY", "MISTRAL_API_KEY"):
+        monkeypatch.delenv(key, raising=False)
 
     with pytest.raises(
         service.TextToSQLError,
-        match="not configured",
+        match="No configured LLM API key",
     ):
         service.ask_with_sql("Count rows", "a" * 32)
 
@@ -205,20 +195,16 @@ def test_ask_with_sql_uses_selected_tables_and_graph_context(
     )
     mock_langchain(monkeypatch, sql)
 
-    class GraphCheckingLLM:
-        def __init__(self, **kwargs):
-            pass
+    def graph_checking_generate(*, system_prompt, user_prompt):
+        assert first_table in system_prompt
+        assert second_table in system_prompt
+        assert '"status":"candidate"' in system_prompt
+        assert '"matched_relationships"' in system_prompt
+        assert unselected_id not in system_prompt
+        assert "private-sample-value" not in system_prompt
+        return sql, "gemini"
 
-        def invoke(self, messages):
-            assert first_table in messages[0].content
-            assert second_table in messages[0].content
-            assert '"status":"candidate"' in messages[0].content
-            assert '"matched_relationships"' in messages[0].content
-            assert unselected_id not in messages[0].content
-            assert "private-sample-value" not in messages[0].content
-            return type("Response", (), {"content": sql})()
-
-    monkeypatch.setattr(service, "ChatGoogleGenerativeAI", GraphCheckingLLM)
+    monkeypatch.setattr(service, "generate_text", graph_checking_generate)
     result = service.ask_with_sql(
         "Compare total quantities",
         dataset_ids=[first_id, second_id],

@@ -23,6 +23,8 @@ class TextToSQLState(TypedDict, total=False):
     status: str
     result: dict[str, Any]
     error: str
+    error_code: str
+    retryable: bool
 
 
 def validate_input(state: TextToSQLState) -> dict[str, Any]:
@@ -81,6 +83,8 @@ def execute_query(state: TextToSQLState) -> dict[str, Any]:
         return {
             "status": "error",
             "error": str(exc),
+            "error_code": exc.code,
+            "retryable": exc.retryable,
         }
     except Exception as exc:
         logger.error(
@@ -96,10 +100,15 @@ def execute_query(state: TextToSQLState) -> dict[str, Any]:
 def finish(state: TextToSQLState) -> dict[str, Any]:
     """Finalize the workflow without running the SQL service."""
 
-    return {
+    result: dict[str, Any] = {
         "status": state.get("status", "error"),
         "error": state.get("error", "Invalid workflow input."),
     }
+    if state.get("error_code"):
+        result["error_code"] = state["error_code"]
+    if "retryable" in state:
+        result["retryable"] = state["retryable"]
+    return result
 
 
 def build_text_to_sql_graph():

@@ -1,5 +1,9 @@
+import sqlite3
+from concurrent.futures import ThreadPoolExecutor
+
 import pytest
 
+from backend.app.services import conversation_store
 from backend.app.services.conversation_store import (
     ConversationStoreError,
     create_conversation,
@@ -103,6 +107,134 @@ def test_create_conversation_uses_default_title_when_blank():
 def test_record_event_rejects_missing_conversation():
     with pytest.raises(ConversationStoreError):
         record_message("missing-conversation", actor="user", message="hello")
+
+
+def test_record_message_idempotency_prevents_duplicate_request_events(tmp_path):
+    database_path = tmp_path / "conversation.db"
+    conversation = create_conversation(database_path=database_path)
+    conversation_id = conversation["conversation_id"]
+    metadata = {"request_id": "request-1", "dataset_ids": ["sheet-1"]}
+
+    first = record_message(
+        conversation_id,
+        actor="user",
+        message="What is the total?",
+        metadata=metadata,
+        idempotency_key="ask:request-1:question",
+        database_path=database_path,
+    )
+    retry = record_message(
+        conversation_id,
+        actor="user",
+        message="What is the total?",
+        metadata=metadata,
+        idempotency_key="ask:request-1:question",
+        database_path=database_path,
+    )
+
+    assert retry["event_id"] == first["event_id"]
+    assert len(get_conversation(conversation_id, database_path)["events"]) == 1
+    with pytest.raises(ConversationStoreError, match="different event"):
+        record_message(
+            conversation_id,
+            actor="user",
+            message="A different question",
+            metadata=metadata,
+            idempotency_key="ask:request-1:question",
+            database_path=database_path,
+        )
+
+
+def test_concurrent_message_writes_keep_unique_contiguous_event_order(tmp_path):
+    database_path = tmp_path / "conversation.db"
+    conversation = create_conversation(database_path=database_path)
+    conversation_id = conversation["conversation_id"]
+    count = 24
+
+    def write_message(index):
+        return record_message(
+            conversation_id,
+            actor="user",
+            message=f"Question {index}",
+            idempotency_key=f"request-{index}",
+            database_path=database_path,
+        )
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        events = list(executor.map(write_message, range(count)))
+
+    stored = get_conversation(conversation_id, database_path)
+    orders = [event["event_order"] for event in stored["events"]]
+    assert len({event["event_id"] for event in events}) == count
+    assert orders == list(range(1, count + 1))
+    connection = sqlite3.connect(database_path)
+    try:
+        journal_mode = connection.execute(
+            "PRAGMA journal_mode"
+        ).fetchone()[0]
+    finally:
+        connection.close()
+    assert journal_mode.lower() == "wal"
+
+
+def test_locked_message_write_recovers_after_lock_is_released(
+    tmp_path,
+    monkeypatch,
+):
+    database_path = tmp_path / "conversation.db"
+    conversation = create_conversation(database_path=database_path)
+    blocker = sqlite3.connect(database_path, timeout=0.01)
+    blocker.execute("BEGIN IMMEDIATE")
+    monkeypatch.setattr(conversation_store, "SQLITE_TIMEOUT_SECONDS", 0.01)
+    monkeypatch.setattr(conversation_store, "SQLITE_BUSY_TIMEOUT_MS", 10)
+    monkeypatch.setattr(
+        conversation_store.time,
+        "sleep",
+        lambda _delay: blocker.rollback(),
+    )
+
+    event = record_message(
+        conversation["conversation_id"],
+        actor="user",
+        message="Retry after lock recovery.",
+        database_path=database_path,
+    )
+    blocker.close()
+
+    stored = get_conversation(
+        conversation["conversation_id"],
+        database_path,
+    )
+    assert stored["events"][0]["event_id"] == event["event_id"]
+
+
+def test_locked_message_write_returns_clear_retryable_error(
+    tmp_path,
+    monkeypatch,
+):
+    database_path = tmp_path / "conversation.db"
+    conversation = create_conversation(database_path=database_path)
+    blocker = sqlite3.connect(database_path, timeout=0.01)
+    blocker.execute("BEGIN IMMEDIATE")
+    monkeypatch.setattr(conversation_store, "SQLITE_TIMEOUT_SECONDS", 0.01)
+    monkeypatch.setattr(conversation_store, "SQLITE_BUSY_TIMEOUT_MS", 10)
+    monkeypatch.setattr(conversation_store.time, "sleep", lambda _delay: None)
+
+    try:
+        with pytest.raises(ConversationStoreError) as error:
+            record_message(
+                conversation["conversation_id"],
+                actor="user",
+                message="This write should report lock contention.",
+                database_path=database_path,
+            )
+    finally:
+        blocker.rollback()
+        blocker.close()
+
+    assert error.value.code == "SQLITE_BUSY"
+    assert error.value.retry_after_seconds == 2
+    assert "retry shortly" in str(error.value)
 
 
 def test_conversation_events_are_persisted_as_an_isolated_graph(tmp_path):

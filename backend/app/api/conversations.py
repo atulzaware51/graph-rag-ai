@@ -14,6 +14,7 @@ from backend.app.services.conversation_store import (
     delete_conversation,
     get_conversation,
     get_conversation_graph,
+    get_event_by_idempotency_key,
     list_conversations,
     record_choice,
     record_clarification,
@@ -71,6 +72,7 @@ class ChatQuestionRequest(BaseModel):
 
     query: str = Field(min_length=1, max_length=2000)
     top_k: int = Field(default=5, ge=1, le=20)
+    request_id: str | None = Field(default=None, min_length=1, max_length=128)
 
 
 class ChatSQLRequest(BaseModel):
@@ -246,8 +248,8 @@ def _selected_graph_context(
     except GraphServiceError as exc:
         raise ConversationStoreError(
             str(exc),
-            code=exc.code,
-            retry_after_seconds=exc.retry_after_seconds,
+            code=exc.code or "GRAPH_RETRIEVAL_FAILED",
+            retry_after_seconds=exc.retry_after_seconds or 5,
         ) from exc
     nodes_by_id = {
         node["id"]: node
@@ -404,11 +406,45 @@ def ask_conversation_question(
 
         for dataset_id in dataset_ids:
             get_dataset_details(dataset_id)
-        graph_context = _selected_graph_context(
-            conversation_id,
-            dataset_ids,
-            include_evidence=True,
+        answer_key = (
+            f"ask:{request.request_id}:answer"
+            if request.request_id
+            else None
         )
+        if answer_key is not None:
+            cached_event = get_event_by_idempotency_key(
+                conversation_id,
+                answer_key,
+            )
+            if cached_event is not None:
+                cached_metadata = cached_event.get("metadata", {})
+                cached_result = cached_metadata.get("response")
+                if (
+                    cached_metadata.get("dataset_ids") != dataset_ids
+                    or cached_metadata.get("top_k") != request.top_k
+                    or (
+                        isinstance(cached_result, dict)
+                        and cached_result.get("question") != request.query
+                    )
+                ):
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="This request ID was already used for a different question or dataset selection.",
+                    )
+                if isinstance(cached_result, dict):
+                    return {
+                        **cached_result,
+                        "conversation_id": conversation_id,
+                        "graph_store": cached_metadata.get(
+                            "graph_store",
+                            graph_store_status(),
+                        ),
+                        "events": {
+                            "user": cached_metadata.get("user_event_id"),
+                            "assistant": cached_event["event_id"],
+                        },
+                    }
+
         history = [
             {
                 "role": event["actor"],
@@ -424,7 +460,25 @@ def ask_conversation_question(
             conversation_id,
             actor="user",
             message=request.query,
-            metadata={"dataset_ids": dataset_ids},
+            metadata={
+                "dataset_ids": dataset_ids,
+                "top_k": request.top_k,
+                **(
+                    {"request_id": request.request_id}
+                    if request.request_id
+                    else {}
+                ),
+            },
+            idempotency_key=(
+                f"ask:{request.request_id}:question"
+                if request.request_id
+                else None
+            ),
+        )
+        graph_context = _selected_graph_context(
+            conversation_id,
+            dataset_ids,
+            include_evidence=True,
         )
         result = answer_question(
             query=request.query,
@@ -439,16 +493,18 @@ def ask_conversation_question(
             message=result["answer"],
             metadata={
                 "dataset_ids": dataset_ids,
+                "top_k": request.top_k,
                 "sources": result.get("sources", []),
                 "status": result["status"],
                 "in_reply_to": user_event["event_id"],
+                "request_id": request.request_id,
+                "response": result,
+                "graph_store": graph_context.get(
+                    "graph_store",
+                    graph_store_status(),
+                ),
             },
-        )
-        _selected_graph_context(
-            conversation_id,
-            dataset_ids,
-            include_evidence=True,
-            include_history=True,
+            idempotency_key=answer_key,
         )
         return {
             **result,
@@ -468,7 +524,13 @@ def ask_conversation_question(
             detail=str(exc),
         ) from exc
     except ConversationStoreError as exc:
-        if "Neo4j" in str(exc):
+        if exc.code == "SQLITE_BUSY" or (
+            exc.code is not None and exc.code.startswith("GRAPH_")
+        ):
+            code = status.HTTP_503_SERVICE_UNAVAILABLE
+        elif exc.code == "IDEMPOTENCY_CONFLICT":
+            code = status.HTTP_409_CONFLICT
+        elif "Neo4j" in str(exc):
             code = status.HTTP_503_SERVICE_UNAVAILABLE
         elif str(exc) == "Conversation not found.":
             code = status.HTTP_404_NOT_FOUND
@@ -476,7 +538,30 @@ def ask_conversation_question(
             code = status.HTTP_404_NOT_FOUND
         else:
             code = status.HTTP_500_INTERNAL_SERVER_ERROR
-        raise HTTPException(status_code=code, detail=str(exc)) from exc
+        detail: str | dict[str, Any] = str(exc)
+        if exc.code:
+            detail = {
+                "code": exc.code,
+                "message": str(exc),
+                "retryable": (
+                    exc.retry_after_seconds is not None
+                    or (exc.code is not None and exc.code.startswith("GRAPH_"))
+                ),
+                **(
+                    {"retry_after_seconds": exc.retry_after_seconds}
+                    if exc.retry_after_seconds is not None
+                    else {}
+                ),
+            }
+        raise HTTPException(
+            status_code=code,
+            detail=detail,
+            headers=(
+                {"Retry-After": str(exc.retry_after_seconds)}
+                if exc.retry_after_seconds is not None
+                else None
+            ),
+        ) from exc
     except DatasetNotFoundError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -497,8 +582,13 @@ def ask_conversation_question(
                 conversation_id,
             )
         raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=str(exc),
+            status_code=exc.http_status,
+            detail=exc.as_dict(),
+            headers=(
+                {"Retry-After": str(exc.retry_after_seconds)}
+                if exc.retry_after_seconds is not None
+                else None
+            ),
         ) from exc
     except Exception as exc:
         logger.exception(
@@ -646,9 +736,27 @@ def run_conversation_sql(
                 "Could not persist SQL failure for conversation %s.",
                 conversation_id,
             )
+        if exc.code != "TEXT_TO_SQL_ERROR":
+            error_status = (
+                status.HTTP_503_SERVICE_UNAVAILABLE
+                if exc.retryable
+                else (
+                    status.HTTP_500_INTERNAL_SERVER_ERROR
+                    if exc.code == "LLM_PROVIDER_NOT_CONFIGURED"
+                    else status.HTTP_502_BAD_GATEWAY
+                )
+            )
+            detail: str | dict[str, Any] = {
+                "code": exc.code,
+                "message": str(exc),
+                "retryable": exc.retryable,
+            }
+        else:
+            error_status = status.HTTP_502_BAD_GATEWAY
+            detail = str(exc)
         raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=str(exc),
+            status_code=error_status,
+            detail=detail,
         ) from exc
     except Exception as exc:
         logger.exception(

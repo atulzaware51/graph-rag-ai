@@ -18,7 +18,8 @@ from backend.app.services.conversation_store import (
     get_conversation,
     record_sql,
 )
-from backend.app.services import neo4j_store
+from backend.app.services import dataset_store
+from backend.app.services.graph_store import GraphPersistenceError
 
 
 def test_store_csv_and_metadata(tmp_path):
@@ -396,39 +397,7 @@ def test_delete_spreadsheet_removes_dataset_data_and_associated_history(tmp_path
         )
 
 
-def test_neo4j_failure_preserves_dataset_sqlite_records(tmp_path, monkeypatch):
-    source = tmp_path / "customers.csv"
-    source.write_text("customer_id,name\n1,Ada\n", encoding="utf-8")
-    database_path = tmp_path / "datasets.db"
-    stored = store_spreadsheet(source, "customers.csv", database_path)
-    failure = neo4j_store.Neo4jStoreError(
-        "Neo4j unavailable.",
-        code="NEO4J_UNAVAILABLE",
-    )
-    monkeypatch.setattr(neo4j_store, "is_configured", lambda: True)
-    monkeypatch.setattr(
-        neo4j_store,
-        "sync_graph",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(failure),
-    )
-
-    with pytest.raises(neo4j_store.Neo4jStoreError):
-        delete_spreadsheet(stored["dataset_id"], database_path)
-
-    with sqlite3.connect(database_path) as connection:
-        dataset = connection.execute(
-            "SELECT table_name FROM datasets WHERE dataset_id = ?",
-            (stored["dataset_id"],),
-        ).fetchone()
-        table_exists = connection.execute(
-            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
-            (stored["table_name"],),
-        ).fetchone()
-    assert dataset == (stored["table_name"],)
-    assert table_exists is not None
-
-
-def test_graph_scope_delete_failure_preserves_dataset_and_skips_graph_sync(
+def test_persistent_graph_failure_preserves_dataset_sqlite_records(
     tmp_path,
     monkeypatch,
 ):
@@ -436,27 +405,16 @@ def test_graph_scope_delete_failure_preserves_dataset_and_skips_graph_sync(
     source.write_text("customer_id,name\n1,Ada\n", encoding="utf-8")
     database_path = tmp_path / "datasets.db"
     stored = store_spreadsheet(source, "customers.csv", database_path)
-    failure = neo4j_store.Neo4jStoreError(
-        "Neo4j unavailable.",
-        code="NEO4J_UNAVAILABLE",
-    )
-    sync_calls = []
-    monkeypatch.setattr(neo4j_store, "is_configured", lambda: True)
+    failure = GraphPersistenceError("database unavailable")
     monkeypatch.setattr(
-        neo4j_store,
-        "delete_graphs",
+        dataset_store,
+        "delete_dataset_graph",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(failure),
     )
-    monkeypatch.setattr(
-        neo4j_store,
-        "sync_graph",
-        lambda *args, **kwargs: sync_calls.append((args, kwargs)),
-    )
 
-    with pytest.raises(neo4j_store.Neo4jStoreError):
+    with pytest.raises(DatasetStorageError, match="persistent knowledge graph"):
         delete_spreadsheet(stored["dataset_id"], database_path)
 
-    assert sync_calls == []
     with sqlite3.connect(database_path) as connection:
         dataset = connection.execute(
             "SELECT table_name FROM datasets WHERE dataset_id = ?",
@@ -468,3 +426,22 @@ def test_graph_scope_delete_failure_preserves_dataset_and_skips_graph_sync(
         ).fetchone()
     assert dataset == (stored["table_name"],)
     assert table_exists is not None
+
+
+def test_dataset_deletion_does_not_depend_on_neo4j(
+    tmp_path,
+    monkeypatch,
+):
+    source = tmp_path / "customers.csv"
+    source.write_text("customer_id,name\n1,Ada\n", encoding="utf-8")
+    database_path = tmp_path / "datasets.db"
+    stored = store_spreadsheet(source, "customers.csv", database_path)
+    deleted_graph_ids = []
+    monkeypatch.setattr(
+        dataset_store,
+        "delete_dataset_graph",
+        lambda dataset_id, **_kwargs: deleted_graph_ids.append(dataset_id),
+    )
+
+    assert delete_spreadsheet(stored["dataset_id"], database_path)
+    assert deleted_graph_ids == [stored["dataset_id"]]

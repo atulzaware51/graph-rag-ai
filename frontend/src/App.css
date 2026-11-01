@@ -5,23 +5,23 @@
 
 :root {
   /* Solid Colors */
-  --bg-base: #f4f7fb;
+  --bg-base: #f3f6fb;
   --bg-panel: #ffffff;
-  --bg-surface: #f7f9fc;
-  --bg-surface-hover: #edf2f8;
+  --bg-surface: #f6f8fc;
+  --bg-surface-hover: #eaf0f8;
   
   /* Primary Brand Accents */
-  --primary: #2563EB;       /* Royal Blue */
-  --primary-hover: #1D4ED8; 
+  --primary: #2458b8;
+  --primary-hover: #1d4694;
   
   /* Text */
-  --text-primary: #1d2a3f;
-  --text-secondary: #596a82;
-  --text-muted: #8492a5;
+  --text-primary: #17263d;
+  --text-secondary: #465873;
+  --text-muted: #65748b;
   
   /* Borders */
-  --border-light: #e2e8f0;
-  --border-focus: #3B82F6;
+  --border-light: #dce4ef;
+  --border-focus: #2458b8;
   
   /* Status */
   --success: #059669;
@@ -117,18 +117,40 @@ body {
 /* Navigation */
 .nav-group { margin-bottom: 24px; }
 .nav-heading {
-  font-size: 0.75rem; color: #8da0bb; font-weight: 700;
-  text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; padding-left: 12px;
+  font-size: 0.7rem; color: #a9bad1; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.09em; margin-bottom: 9px; padding-left: 12px;
 }
 .nav-item {
+  position: relative;
   display: flex; align-items: center; gap: 12px;
-  width: 100%; padding: 10px 12px;
-  background: transparent; border: none; border-radius: var(--radius-sm);
-  color: #c0ccdc; font-size: 0.9rem; font-weight: 500; cursor: pointer; transition: var(--transition);
+  width: 100%; min-height: 42px; padding: 10px 12px;
+  background: transparent; border: 1px solid transparent; border-radius: var(--radius-md);
+  color: #d0dced; font-size: 0.9rem; font-weight: 500; text-align: left;
+  cursor: pointer; transition: var(--transition);
 }
-.nav-item:hover { background-color: rgba(255, 255, 255, 0.08); color: #fff; }
-.nav-item.active { background-color: #1d4c92; color: #FFF; }
-.nav-icon { font-size: 1.1rem; }
+.nav-item:hover { background-color: rgba(255, 255, 255, 0.09); color: #fff; }
+.nav-item.active {
+  background: linear-gradient(90deg, rgba(47, 105, 197, 0.48), rgba(47, 105, 197, 0.2));
+  border-color: rgba(153, 190, 245, 0.2);
+  color: #fff;
+  font-weight: 650;
+}
+.nav-item.active::before {
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: -1px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: #8ab8ff;
+  content: '';
+}
+.nav-item:focus-visible {
+  outline: 2px solid #a9ccff;
+  outline-offset: 2px;
+}
+.nav-icon { width: 20px; color: #a9bdd9; font-size: 1.05rem; text-align: center; }
+.nav-item.active .nav-icon { color: #c6ddff; }
 
 /* Chat History List */
 .chat-history {
@@ -137,7 +159,7 @@ body {
 }
 .chat-history-heading {
   display: flex; justify-content: space-between; align-items: center;
-  font-size: 0.75rem; color: #9aabc4; font-weight: 700; padding: 0 12px; margin-bottom: 12px;
+  font-size: 0.75rem; color: #b2c2d8; font-weight: 700; padding: 0 12px; margin-bottom: 12px;
 }
 .new-chat-button {
   background: rgba(255, 255, 255, 0.07); border: 1px solid rgba(197, 215, 242, 0.18); color: #eef4ff;
@@ -156,7 +178,7 @@ body {
   display: flex; align-items: center; gap: 8px;
   min-width: 0; flex: 1; padding: 8px 8px 8px 12px;
   background: transparent; border: none; border-radius: var(--radius-sm);
-  color: #b9c7da; font-size: 0.85rem; text-align: left; cursor: pointer;
+  color: #c8d5e7; font-size: 0.85rem; text-align: left; cursor: pointer;
 }
 .chat-history-item:hover { color: #fff; }
 .chat-history-row.active { background-color: rgba(58, 110, 181, 0.3); }
@@ -165,7 +187,7 @@ body {
 .chat-delete-button {
   flex: 0 0 auto; margin-right: 6px; padding: 2px 6px;
   border: 0; border-radius: 4px; background: transparent;
-  color: #9aabc4; font-size: 1rem; line-height: 1.2; cursor: pointer;
+  color: #b2c2d8; font-size: 1rem; line-height: 1.2; cursor: pointer;
   opacity: 0;
 }
 .chat-history-row:hover .chat-delete-button,

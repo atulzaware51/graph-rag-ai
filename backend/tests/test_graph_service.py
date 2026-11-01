@@ -188,27 +188,25 @@ def test_graph_rejects_stored_columns_missing_from_physical_schema(tmp_path):
         build_graph_from_database(database)
 
 
-def test_scoped_graph_uses_sqlite_when_neo4j_is_not_configured(monkeypatch):
-    sqlite_graph = {
+def test_scoped_graph_returns_the_persistent_database_graph(monkeypatch):
+    persistent_graph = {
         "status": "success",
-        "nodes": [{"id": "dataset:one"}],
+        "graph_store": "postgresql",
+        "nodes": [{"id": "dataset:one", "dataset_id": "one"}],
         "edges": [],
         "candidate_relationships": [{"status": "candidate"}],
     }
     monkeypatch.setattr(
         graph_service,
         "build_graph_from_database",
-        lambda *_args, **_kwargs: sqlite_graph,
+        lambda *_args, **_kwargs: persistent_graph,
     )
-    monkeypatch.setattr(neo4j_store, "is_configured", lambda: False)
 
-    graph = build_graph_for_scope("scope", ["dataset"])
-
-    assert graph == sqlite_graph
+    assert build_graph_for_scope("scope", ["dataset"]) == persistent_graph
 
 
 @pytest.mark.parametrize("failed_operation", ["sync", "read"])
-def test_scoped_graph_falls_back_to_sqlite_on_neo4j_failure(
+def test_scoped_graph_ignores_neo4j_failures(
     monkeypatch,
     caplog,
     failed_operation,
@@ -216,6 +214,7 @@ def test_scoped_graph_falls_back_to_sqlite_on_neo4j_failure(
     credential_text = "password=must-not-be-logged"
     sqlite_graph = {
         "status": "success",
+        "graph_store": "sqlite",
         "nodes": [{"id": "dataset:one", "label": "Sales"}],
         "edges": [{"id": "match:one", "type": "CANDIDATE_MATCH"}],
         "candidate_relationships": [{"status": "candidate", "confidence": 0.9}],
@@ -253,11 +252,11 @@ def test_scoped_graph_falls_back_to_sqlite_on_neo4j_failure(
         sqlite_graph["candidate_relationships"]
     )
     assert graph["graph_store"] == "sqlite"
-    assert "Neo4j graph unavailable" in caplog.text
+    assert "Neo4j graph unavailable" not in caplog.text
     assert credential_text not in caplog.text
 
 
-def test_scoped_graph_uses_neo4j_when_available(monkeypatch):
+def test_scoped_graph_always_uses_the_persistent_database(monkeypatch):
     sqlite_graph = {"nodes": [], "edges": [], "candidate_relationships": []}
     persisted_graph = {
         "scope_id": "scope",
@@ -284,8 +283,8 @@ def test_scoped_graph_uses_neo4j_when_available(monkeypatch):
 
     graph = build_graph_for_scope("scope", ["dataset"])
 
-    assert sync_calls == [("scope", sqlite_graph)]
-    assert graph == {**persisted_graph, "candidate_relationships": [], "graph_store": "neo4j"}
+    assert sync_calls == []
+    assert graph == sqlite_graph
 
 
 def test_scoped_graph_preserves_validation_and_sqlite_build_errors(
@@ -309,7 +308,7 @@ def test_scoped_graph_preserves_validation_and_sqlite_build_errors(
     assert raised.value is failure
 
 
-def test_scoped_empty_graph_is_synchronized_when_neo4j_is_available(
+def test_scoped_empty_graph_does_not_require_neo4j(
     monkeypatch,
 ):
     empty_graph = {
@@ -338,8 +337,7 @@ def test_scoped_empty_graph_is_synchronized_when_neo4j_is_available(
 
     graph = build_graph_for_scope("empty-scope", [])
 
-    assert sync_calls == [("empty-scope", empty_graph)]
+    assert sync_calls == []
     assert graph["nodes"] == []
     assert graph["edges"] == []
     assert graph["candidate_relationships"] == []
-    assert graph["graph_store"] == "neo4j"

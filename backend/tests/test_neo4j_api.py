@@ -97,7 +97,7 @@ def test_application_lifespan_closes_shared_driver(monkeypatch):
     assert closed == [True]
 
 
-def test_graph_api_returns_sqlite_graph_when_neo4j_sync_fails(monkeypatch):
+def test_graph_api_uses_the_persistent_graph_store(monkeypatch):
     sqlite_graph = {
         "status": "success",
         "node_count": 1,
@@ -111,18 +111,6 @@ def test_graph_api_returns_sqlite_graph_when_neo4j_sync_fails(monkeypatch):
         "build_graph_from_database",
         lambda: sqlite_graph.copy(),
     )
-    monkeypatch.setattr(graph_api, "is_configured", lambda: True)
-    monkeypatch.setattr(
-        graph_api,
-        "sync_graph",
-        lambda *_args: (_ for _ in ()).throw(
-            Neo4jStoreError(
-                "Neo4j TLS connection failed.",
-                code="NEO4J_TLS_CONNECTION_FAILED",
-            )
-        ),
-    )
-
     response = client.get("/graph/")
 
     assert response.status_code == 200
@@ -134,7 +122,7 @@ def test_graph_api_returns_sqlite_graph_when_neo4j_sync_fails(monkeypatch):
     assert body["graph_store"] == "sqlite"
 
 
-def test_graph_api_returns_sqlite_graph_when_neo4j_read_fails(monkeypatch):
+def test_graph_api_does_not_read_graph_from_neo4j(monkeypatch):
     monkeypatch.setattr(
         graph_api,
         "build_graph_from_database",
@@ -144,19 +132,6 @@ def test_graph_api_returns_sqlite_graph_when_neo4j_read_fails(monkeypatch):
             "edges": [],
         },
     )
-    monkeypatch.setattr(graph_api, "is_configured", lambda: True)
-    monkeypatch.setattr(graph_api, "sync_graph", lambda *_args: True)
-    monkeypatch.setattr(
-        graph_api,
-        "get_graph",
-        lambda *_args: (_ for _ in ()).throw(
-            Neo4jStoreError(
-                "Neo4j unavailable.",
-                code="NEO4J_UNAVAILABLE",
-            )
-        ),
-    )
-
     response = client.get("/graph/")
 
     assert response.status_code == 200

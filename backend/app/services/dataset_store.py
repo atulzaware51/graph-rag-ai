@@ -19,11 +19,24 @@ from typing import Any
 import pandas as pd
 import xlrd
 
-from backend.app.services.neo4j_store import Neo4jStoreError
+from backend.app.core.database import graph_database_url_for_source
+from backend.app.services.graph_store import (
+    GraphPersistenceError,
+    delete_dataset_graph,
+)
 
 
 # Define set of acceptable/supported file extensions for dataset storage
 SUPPORTED_EXTENSIONS = {".csv", ".xls", ".xlsx"}
+DATASET_STATUS_COLUMNS = {
+    "upload_status": "complete",
+    "parsing_status": "complete",
+    "storage_status": "complete",
+    "chunk_status": "complete",
+    "graph_build_status": "pending",
+    "graph_updated_at": None,
+    "graph_error": None,
+}
 
 
 # Custom exception class inheriting from Exception to handle dataset storage errors safely
@@ -113,7 +126,6 @@ def _content_fingerprint(dataframe: pd.DataFrame) -> str:
 
 # Helper function to initialize required database tables and indexes if they do not exist
 def _create_metadata_tables(connection: sqlite3.Connection) -> None:
-    # Create main 'datasets' table tracking uploaded dataset metadata
     connection.execute(
         """
         CREATE TABLE IF NOT EXISTS datasets (
@@ -122,10 +134,32 @@ def _create_metadata_tables(connection: sqlite3.Connection) -> None:
             table_name TEXT NOT NULL UNIQUE,
             row_count INTEGER NOT NULL,
             column_count INTEGER NOT NULL,
-            created_at TEXT NOT NULL
+            created_at TEXT NOT NULL,
+            upload_status TEXT NOT NULL DEFAULT 'complete',
+            parsing_status TEXT NOT NULL DEFAULT 'complete',
+            storage_status TEXT NOT NULL DEFAULT 'complete',
+            chunk_status TEXT NOT NULL DEFAULT 'complete',
+            graph_build_status TEXT NOT NULL DEFAULT 'pending',
+            graph_updated_at TEXT,
+            graph_error TEXT
         )
         """
     )
+    existing = {
+        row[1]
+        for row in connection.execute('PRAGMA table_info("datasets")')
+    }
+    for column_name, default_value in DATASET_STATUS_COLUMNS.items():
+        if column_name in existing:
+            continue
+        if default_value is None:
+            connection.execute(
+                f'ALTER TABLE datasets ADD COLUMN {column_name} TEXT'
+            )
+        else:
+            connection.execute(
+                f"ALTER TABLE datasets ADD COLUMN {column_name} TEXT NOT NULL DEFAULT '{default_value}'"
+            )
 
     # Create 'dataset_columns' table mapping original column names to generated SQL column names
     connection.execute(
@@ -304,8 +338,11 @@ def store_spreadsheet(
             """
             INSERT INTO datasets (
                 dataset_id, original_filename, table_name,
-                row_count, column_count, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?)
+                row_count, column_count, created_at,
+                upload_status, parsing_status, storage_status,
+                chunk_status, graph_build_status, graph_updated_at,
+                graph_error
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 dataset_id,
@@ -314,6 +351,13 @@ def store_spreadsheet(
                 len(dataframe),
                 len(sql_columns),
                 created_at,
+                "complete",
+                "complete",
+                "complete",
+                "complete",
+                "pending",
+                None,
+                None,
             ),
         )
 
@@ -465,17 +509,43 @@ def get_dataset_details(
     try:
         with sqlite3.connect(database) as connection:
             connection.row_factory = sqlite3.Row
-            row = connection.execute(
-                """
-                SELECT dataset_id, original_filename, table_name,
-                       row_count, column_count, created_at
-                FROM datasets
-                WHERE dataset_id = ?
-                """,
-                (dataset_id.strip(),),
-            ).fetchone()
+            try:
+                row = connection.execute(
+                    """
+                    SELECT dataset_id, original_filename, table_name,
+                           row_count, column_count, created_at,
+                           upload_status, parsing_status, storage_status,
+                           chunk_status, graph_build_status, graph_updated_at,
+                           graph_error
+                    FROM datasets
+                    WHERE dataset_id = ?
+                    """,
+                    (dataset_id.strip(),),
+                ).fetchone()
+            except sqlite3.OperationalError:
+                row = connection.execute(
+                    """
+                    SELECT dataset_id, original_filename, table_name,
+                           row_count, column_count, created_at
+                    FROM datasets
+                    WHERE dataset_id = ?
+                    """,
+                    (dataset_id.strip(),),
+                ).fetchone()
 
-        return dict(row) if row else None
+        if row is None:
+            return None
+        metadata = dict(row)
+        metadata.setdefault("upload_status", "complete")
+        metadata.setdefault("parsing_status", "complete")
+        metadata.setdefault("storage_status", "complete")
+        metadata.setdefault("chunk_status", "complete")
+        metadata.setdefault("graph_build_status", "pending")
+        metadata.setdefault("graph_updated_at", None)
+        metadata.setdefault("graph_error", None)
+        metadata["graph_status"] = metadata.get("graph_build_status", "pending")
+        metadata["graph_available"] = metadata.get("graph_build_status") == "complete"
+        return metadata
 
     except sqlite3.Error as exc:
         raise DatasetStorageError(
@@ -487,7 +557,7 @@ def delete_spreadsheet(
     dataset_id: str,
     database_path: str | Path = "data/graphsheet.db",
 ) -> bool:
-    """Delete a dataset after its configured Neo4j scopes are cleared."""
+    """Delete a dataset after its persisted graph records are cleared."""
 
     if (
         not isinstance(dataset_id, str)
@@ -522,40 +592,15 @@ def delete_spreadsheet(
                 existing_tables,
                 dataset_id,
             )
-            remaining_dataset_ids = [
-                row["dataset_id"]
-                for row in connection.execute(
-                    "SELECT dataset_id FROM datasets WHERE dataset_id != ?",
-                    (dataset_id,),
-                )
-            ]
-
-        from backend.app.services.neo4j_store import (
-            delete_graphs,
-            is_configured,
-            sync_graph,
-        )
-
-        if is_configured():
-            from backend.app.services.graph_service import (
-                build_graph_from_database,
+        try:
+            delete_dataset_graph(
+                dataset_id,
+                database_url=graph_database_url_for_source(database),
             )
-
-            replacement_graph = build_graph_from_database(
-                database,
-                dataset_ids=remaining_dataset_ids,
-            )
-            graph_scopes = [
-                scope
-                for conversation_id in conversation_ids
-                for scope in (
-                    conversation_id,
-                    f"chat-schema:{conversation_id}",
-                )
-            ]
-            graph_scopes.append(f"dataset-query:{dataset_id}")
-            delete_graphs(graph_scopes)
-            sync_graph("dataset-schema", replacement_graph)
+        except GraphPersistenceError as exc:
+            raise DatasetStorageError(
+                "Could not remove the dataset's persistent knowledge graph."
+            ) from exc
 
         with sqlite3.connect(database) as connection:
             connection.execute("PRAGMA foreign_keys = ON")
@@ -637,8 +682,6 @@ def delete_spreadsheet(
         raise DatasetStorageError(
             "Could not delete the dataset and its associated data."
         ) from exc
-    except Neo4jStoreError:
-        raise
 
 
 def _dataset_conversation_ids(

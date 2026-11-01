@@ -40,17 +40,42 @@ def list_datasets(
             connection.row_factory = sqlite3.Row
 
             # Query all datasets from the database sorted by creation timestamp (newest first)
-            rows = connection.execute(
-                """
-                SELECT dataset_id, original_filename, table_name,
-                       row_count, column_count, created_at
-                FROM datasets
-                ORDER BY created_at DESC
-                """
-            ).fetchall()
+            try:
+                rows = connection.execute(
+                    """
+                    SELECT dataset_id, original_filename, table_name,
+                           row_count, column_count, created_at,
+                           upload_status, parsing_status, storage_status,
+                           chunk_status, graph_build_status, graph_updated_at,
+                           graph_error
+                    FROM datasets
+                    ORDER BY created_at DESC
+                    """
+                ).fetchall()
+            except sqlite3.OperationalError:
+                rows = connection.execute(
+                    """
+                    SELECT dataset_id, original_filename, table_name,
+                           row_count, column_count, created_at
+                    FROM datasets
+                    ORDER BY created_at DESC
+                    """
+                ).fetchall()
 
-            # Convert each sqlite3.Row object into a standard dictionary and return the list
-            return [dict(row) for row in rows]
+            datasets = []
+            for row in rows:
+                payload = dict(row)
+                payload.setdefault("upload_status", "complete")
+                payload.setdefault("parsing_status", "complete")
+                payload.setdefault("storage_status", "complete")
+                payload.setdefault("chunk_status", "complete")
+                payload.setdefault("graph_build_status", "pending")
+                payload.setdefault("graph_updated_at", None)
+                payload.setdefault("graph_error", None)
+                payload["graph_status"] = payload.get("graph_build_status", "pending")
+                payload["graph_available"] = payload.get("graph_build_status") == "complete"
+                datasets.append(payload)
+            return datasets
 
     # Catch SQLite runtime errors and wrap them in a custom exception
     except sqlite3.Error as exc:
@@ -80,15 +105,29 @@ def get_dataset_details(
             connection.row_factory = sqlite3.Row
 
             # Query primary metadata for the specified dataset ID
-            dataset = connection.execute(
-                """
-                SELECT dataset_id, original_filename, table_name,
-                       row_count, column_count, created_at
-                FROM datasets
-                WHERE dataset_id = ?
-                """,
-                (dataset_id,),
-            ).fetchone()
+            try:
+                dataset = connection.execute(
+                    """
+                    SELECT dataset_id, original_filename, table_name,
+                           row_count, column_count, created_at,
+                           upload_status, parsing_status, storage_status,
+                           chunk_status, graph_build_status, graph_updated_at,
+                           graph_error
+                    FROM datasets
+                    WHERE dataset_id = ?
+                    """,
+                    (dataset_id,),
+                ).fetchone()
+            except sqlite3.OperationalError:
+                dataset = connection.execute(
+                    """
+                    SELECT dataset_id, original_filename, table_name,
+                           row_count, column_count, created_at
+                    FROM datasets
+                    WHERE dataset_id = ?
+                    """,
+                    (dataset_id,),
+                ).fetchone()
 
             # Check if matching dataset record was found
             if dataset is None:
@@ -111,6 +150,15 @@ def get_dataset_details(
 
         # Convert main dataset row to a standard dictionary
         result = dict(dataset)
+        result.setdefault("upload_status", "complete")
+        result.setdefault("parsing_status", "complete")
+        result.setdefault("storage_status", "complete")
+        result.setdefault("chunk_status", "complete")
+        result.setdefault("graph_build_status", "pending")
+        result.setdefault("graph_updated_at", None)
+        result.setdefault("graph_error", None)
+        result["graph_status"] = result.get("graph_build_status", "pending")
+        result["graph_available"] = result.get("graph_build_status") == "complete"
         # Convert column rows to dictionaries and attach as a list under 'columns'
         result["columns"] = [dict(column) for column in columns]
         # Return complete dataset dictionary with its column schema

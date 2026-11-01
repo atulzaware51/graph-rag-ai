@@ -124,12 +124,20 @@ def test_chat_question_uses_selected_sheets_graph_and_same_chat_history(
     )
     recorded = []
 
-    def fake_record_message(conversation_id, *, actor, message, metadata=None):
+    def fake_record_message(
+        conversation_id,
+        *,
+        actor,
+        message,
+        metadata=None,
+        idempotency_key=None,
+    ):
         event = {
             "event_id": f"event-{len(recorded)}",
             "actor": actor,
             "message": message,
             "metadata": metadata,
+            "idempotency_key": idempotency_key,
         }
         recorded.append(event)
         return event
@@ -168,6 +176,224 @@ def test_chat_question_uses_selected_sheets_graph_and_same_chat_history(
     assert captured["graph_context"]["selected_ids"] == dataset_ids
     assert [event["actor"] for event in recorded] == ["user", "assistant"]
     assert response.json()["sources"][0]["dataset_id"] == dataset_ids[1]
+
+
+def test_chat_question_request_replays_persisted_answer_without_regeneration(
+    monkeypatch,
+):
+    dataset_ids = ["a" * 32]
+    request_id = "request-1"
+    expected_result = {
+        "status": "success",
+        "answer": "Previously generated answer.",
+        "question": "What is the total?",
+        "dataset_ids": dataset_ids,
+        "sources": [],
+        "graph_retrieval": {"graph_available": True},
+    }
+    monkeypatch.setattr(
+        conversations_api,
+        "get_conversation",
+        lambda _conversation_id: {
+            "selected_dataset_ids": dataset_ids,
+            "events": [],
+        },
+    )
+    monkeypatch.setattr(
+        conversations_api,
+        "validate_dataset_ids",
+        lambda ids: ids,
+    )
+    monkeypatch.setattr(
+        conversations_api,
+        "get_dataset_details",
+        lambda _dataset_id: {"dataset_id": dataset_ids[0]},
+    )
+    monkeypatch.setattr(
+        conversations_api,
+        "get_event_by_idempotency_key",
+        lambda _conversation_id, key: (
+            {
+                "event_id": "assistant-event",
+                "metadata": {
+                    "response": expected_result,
+                    "dataset_ids": dataset_ids,
+                    "top_k": 5,
+                    "graph_store": "sqlite",
+                    "user_event_id": "user-event",
+                },
+            }
+            if key == f"ask:{request_id}:answer"
+            else None
+        ),
+    )
+    monkeypatch.setattr(
+        conversations_api,
+        "_selected_graph_context",
+        lambda *_args, **_kwargs: pytest.fail(
+            "A completed retry must not repeat graph or Gemini work."
+        ),
+    )
+    monkeypatch.setattr(
+        conversations_api,
+        "answer_question",
+        lambda **_kwargs: pytest.fail(
+            "A completed retry must replay its persisted answer."
+        ),
+    )
+
+    response = client.post(
+        "/conversations/chat-a/ask",
+        json={"query": expected_result["question"], "request_id": request_id},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["answer"] == expected_result["answer"]
+    assert response.json()["events"] == {
+        "user": "user-event",
+        "assistant": "assistant-event",
+    }
+
+
+def test_graph_failure_keeps_user_message_and_returns_retryable_error(
+    monkeypatch,
+):
+    dataset_ids = ["a" * 32]
+    recorded = []
+    monkeypatch.setattr(
+        conversations_api,
+        "get_conversation",
+        lambda _conversation_id: {
+            "selected_dataset_ids": dataset_ids,
+            "events": [],
+        },
+    )
+    monkeypatch.setattr(
+        conversations_api,
+        "validate_dataset_ids",
+        lambda ids: ids,
+    )
+    monkeypatch.setattr(
+        conversations_api,
+        "get_dataset_details",
+        lambda _dataset_id: {"dataset_id": dataset_ids[0]},
+    )
+    monkeypatch.setattr(
+        conversations_api,
+        "get_event_by_idempotency_key",
+        lambda *_args: None,
+    )
+
+    def record_user(_conversation_id, **kwargs):
+        recorded.append(kwargs)
+        return {"event_id": "user-event"}
+
+    monkeypatch.setattr(conversations_api, "record_message", record_user)
+    monkeypatch.setattr(
+        conversations_api,
+        "_selected_graph_context",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            conversation_store.ConversationStoreError(
+                "Graph database unavailable.",
+                code="GRAPH_RETRIEVAL_FAILED",
+            )
+        ),
+    )
+
+    response = client.post(
+        "/conversations/chat-a/ask",
+        json={
+            "query": "What is the total?",
+            "request_id": "request-retry",
+        },
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "GRAPH_RETRIEVAL_FAILED"
+    assert response.json()["detail"]["retryable"] is True
+    assert recorded[0]["actor"] == "user"
+    assert recorded[0]["idempotency_key"] == "ask:request-retry:question"
+
+
+def test_provider_failures_are_returned_with_safe_diagnostics(monkeypatch):
+    dataset_ids = ["a" * 32]
+    monkeypatch.setattr(
+        conversations_api,
+        "get_conversation",
+        lambda _conversation_id: {
+            "selected_dataset_ids": dataset_ids,
+            "events": [],
+        },
+    )
+    monkeypatch.setattr(
+        conversations_api,
+        "validate_dataset_ids",
+        lambda ids: ids,
+    )
+    monkeypatch.setattr(
+        conversations_api,
+        "get_dataset_details",
+        lambda _dataset_id: {"dataset_id": dataset_ids[0]},
+    )
+    monkeypatch.setattr(
+        conversations_api,
+        "get_event_by_idempotency_key",
+        lambda *_args: None,
+    )
+    monkeypatch.setattr(
+        conversations_api,
+        "record_message",
+        lambda _conversation_id, **kwargs: {
+            "event_id": f"{kwargs['actor']}-event",
+        },
+    )
+    monkeypatch.setattr(
+        conversations_api,
+        "_selected_graph_context",
+        lambda *_args, **_kwargs: {
+            "nodes": [],
+            "edges": [],
+            "graph_store": "sqlite",
+        },
+    )
+    monkeypatch.setattr(
+        conversations_api,
+        "answer_question",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            answer_service.AnswerServiceError(
+                "All configured LLM providers are unavailable. "
+                "Provider diagnostics: Gemini: authentication failed; "
+                "Groq: rate limited; Mistral: model unavailable.",
+                code="LLM_PROVIDERS_UNAVAILABLE",
+                http_status=503,
+                retryable=True,
+                retry_after_seconds=5,
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        conversations_api,
+        "record_event",
+        lambda *_args, **_kwargs: None,
+    )
+
+    response = client.post(
+        "/conversations/chat-a/ask",
+        json={"query": "What is the total?", "request_id": "request-503"},
+    )
+
+    assert response.status_code == 503
+    assert response.headers["retry-after"] == "5"
+    assert response.json()["detail"] == {
+        "code": "LLM_PROVIDERS_UNAVAILABLE",
+        "message": (
+            "All configured LLM providers are unavailable. "
+            "Provider diagnostics: Gemini: authentication failed; "
+            "Groq: rate limited; Mistral: model unavailable."
+        ),
+        "retryable": True,
+        "retry_after_seconds": 5,
+    }
 
 
 def test_chat_rag_reads_selected_evidence_from_the_graph(
@@ -234,12 +460,20 @@ def test_chat_rag_reads_selected_evidence_from_the_graph(
     )
     recorded = []
 
-    def fake_record_message(_conversation_id, *, actor, message, metadata=None):
+    def fake_record_message(
+        _conversation_id,
+        *,
+        actor,
+        message,
+        metadata=None,
+        idempotency_key=None,
+    ):
         event = {
             "event_id": f"event-{len(recorded)}",
             "actor": actor,
             "message": message,
             "metadata": metadata or {},
+            "idempotency_key": idempotency_key,
         }
         recorded.append(event)
         return event
@@ -249,23 +483,12 @@ def test_chat_rag_reads_selected_evidence_from_the_graph(
         "record_message",
         fake_record_message,
     )
-    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    def fake_generate_text(*, system_prompt="", user_prompt):
+        assert "Sales: 12" in user_prompt
+        assert "Evidence chunk 1" not in user_prompt
+        return "Sales is 12.", "gemini"
 
-    class FakeModels:
-        def generate_content(self, **kwargs):
-            assert "Sales: 12" in kwargs["contents"]
-            assert "Evidence chunk 1" not in kwargs["contents"]
-            return type(
-                "FakeResponse",
-                (),
-                {"text": "Sales is 12."},
-            )()
-
-    monkeypatch.setattr(
-        answer_service.genai,
-        "Client",
-        lambda **_kwargs: type("FakeClient", (), {"models": FakeModels()})(),
-    )
+    monkeypatch.setattr(answer_service, "generate_text", fake_generate_text)
 
     response = client.post(
         "/conversations/chat-rag/ask",

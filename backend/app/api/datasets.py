@@ -267,6 +267,7 @@ def ask_dataset_with_sql(
                 "error",
                 "Text-to-SQL workflow failed.",
             )
+            error_code = result.get("error_code")
 
             # The requested dataset does not exist.
             if message == "Dataset not found.":
@@ -285,11 +286,25 @@ def ask_dataset_with_sql(
                     detail=message,
                 )
 
-            # A missing API key is a server configuration problem.
-            if "GEMINI_API_KEY" in message:
+            # Missing provider keys are a server configuration problem.
+            if error_code == "LLM_PROVIDER_NOT_CONFIGURED":
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail="Text-to-SQL service is not configured.",
+                )
+
+            if error_code == "LLM_PROVIDERS_UNAVAILABLE":
+                raise HTTPException(
+                    status_code=(
+                        status.HTTP_503_SERVICE_UNAVAILABLE
+                        if result.get("retryable")
+                        else status.HTTP_502_BAD_GATEWAY
+                    ),
+                    detail={
+                        "code": error_code,
+                        "message": message,
+                        "retryable": bool(result.get("retryable")),
+                    },
                 )
 
             # Other handled workflow errors.

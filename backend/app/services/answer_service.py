@@ -1,17 +1,19 @@
-"""Gemini-powered question answering for GraphSheet AI."""
+"""Graph-grounded question answering for GraphSheet AI."""
 
 from __future__ import annotations
 
 import logging
 import json
-import os
 from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
-from google import genai
 
 from backend.app.services.dataset_store import DatasetStorageError
+from backend.app.services.llm_provider import (
+    LLMProviderError,
+    generate_text,
+)
 from backend.app.services.retrieval import (
     RetrievalError,
     build_graph_retrieval_context,
@@ -29,6 +31,32 @@ load_dotenv(PROJECT_ROOT / ".env")
 
 class AnswerServiceError(RuntimeError):
     """Raised when question answering cannot be completed."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str = "ANSWER_SERVICE_ERROR",
+        http_status: int = 502,
+        retryable: bool = False,
+        retry_after_seconds: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.http_status = http_status
+        self.retryable = retryable
+        self.retry_after_seconds = retry_after_seconds
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return a stable client error without provider internals."""
+        error: dict[str, Any] = {
+            "code": self.code,
+            "message": str(self),
+            "retryable": self.retryable,
+        }
+        if self.retry_after_seconds is not None:
+            error["retry_after_seconds"] = self.retry_after_seconds
+        return error
 
 
 def answer_question(
@@ -72,9 +100,17 @@ def answer_question(
         normalized_dataset_ids,
         graph_context,
     )
-
-    api_key = os.getenv("GEMINI_API_KEY", "").strip()
-    model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip()
+    retrieval_summary = selected_graph_context.get("retrieval", {})
+    if graph_context is not None and not retrieval_summary.get("graph_available", False):
+        raise AnswerServiceError(
+            "Mandatory graph retrieval failed for the selected datasets. "
+            "The graph context is empty or did not match the question. Retrying "
+            "is safe once the graph has been rebuilt or refreshed.",
+            code="GRAPH_RETRIEVAL_FAILED",
+            http_status=503,
+            retryable=True,
+            retry_after_seconds=5,
+        )
 
     # Retrieve evidence relevant to the user's question.
     try:
@@ -115,14 +151,6 @@ def answer_question(
             "sources": [],
             "graph_retrieval": selected_graph_context["retrieval"],
         }
-
-    if not api_key:
-        raise AnswerServiceError(
-            "GEMINI_API_KEY is missing. Configure it in the project .env file."
-        )
-
-    if not model:
-        raise AnswerServiceError("GEMINI_MODEL must not be empty.")
 
     evidence_parts: list[str] = []
 
@@ -200,32 +228,31 @@ Earlier messages in this chat:
 Provide an answer grounded in the evidence.
 """.strip()
 
-    # Generate a grounded answer using Gemini.
+    # Generate a grounded answer using the first available configured provider.
     try:
-        client = genai.Client(api_key=api_key)
-        response = client.models.generate_content(
-            model=model,
-            contents=prompt,
-        )
-
-        answer = (response.text or "").strip()
-
-        if not answer:
-            raise AnswerServiceError(
-                "Gemini returned an empty answer. Check the backend logs "
-                "and model response."
-            )
-
-    except AnswerServiceError:
-        raise
-    except Exception as exc:
+        answer, llm_provider = generate_text(user_prompt=prompt)
+    except LLMProviderError as exc:
         logger.exception(
-            "Gemini request failed for dataset_id=%s using model=%s",
+            "All LLM providers failed for dataset_id=%s (code=%s).",
             dataset_id,
-            model,
+            exc.code,
         )
         raise AnswerServiceError(
-            "Gemini request failed. Check the backend logs for details."
+            str(exc),
+            code=exc.code,
+            http_status=503 if exc.retryable else 502,
+            retryable=exc.retryable,
+            retry_after_seconds=5 if exc.retryable else None,
+        ) from exc
+    except Exception as exc:
+        logger.exception(
+            "LLM generation failed for dataset_id=%s.",
+            dataset_id,
+        )
+        raise AnswerServiceError(
+            "Could not generate an answer with the configured LLM providers.",
+            code="LLM_GENERATION_FAILED",
+            http_status=502,
         ) from exc
 
     return {
@@ -234,6 +261,7 @@ Provide an answer grounded in the evidence.
         "dataset_ids": normalized_dataset_ids,
         "question": query,
         "answer": answer,
+        "llm_provider": llm_provider,
         "sources": [
             {
                 "chunk_id": chunk["chunk_id"],

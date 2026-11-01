@@ -7,6 +7,12 @@ os.environ["PYTHON_DOTENV_DISABLED"] = "1"
 for variable in (
     "GEMINI_API_KEY",
     "GEMINI_MODEL",
+    "GROQ_API_KEY",
+    "GROQ_MODEL",
+    "MISTRAL_API_KEY",
+    "MISTRAL_MODEL",
+    "LLM_PROVIDER",
+    "LLM_FALLBACK_PROVIDERS",
     "NEO4J_URI",
     "NEO4J_USERNAME",
     "NEO4J_PASSWORD",

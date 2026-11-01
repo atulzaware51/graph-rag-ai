@@ -1,6 +1,3 @@
-
-"""Tests for the GraphSheet AI answer service."""
-
 import pytest
 
 from backend.app.services import answer_service
@@ -25,100 +22,52 @@ def sample_chunks():
 
 
 def test_answer_question_returns_no_evidence(monkeypatch):
-    monkeypatch.setattr(
-        answer_service,
-        "retrieve_chunks",
-        lambda **kwargs: [],
-    )
-
-    result = answer_question(
-        query="What were the sales?",
-        dataset_id="dataset-1",
-    )
+    monkeypatch.setattr(answer_service, "retrieve_chunks", lambda **_kwargs: [])
+    result = answer_question(query="What were the sales?", dataset_id="dataset-1")
 
     assert result["status"] == "no_evidence"
     assert result["sources"] == []
     assert "couldn't find relevant information" in result["answer"]
 
 
-def test_answer_question_requires_api_key(monkeypatch):
+def test_answer_question_requires_at_least_one_provider_key(monkeypatch):
+    for key in ("GEMINI_API_KEY", "GROQ_API_KEY", "MISTRAL_API_KEY"):
+        monkeypatch.delenv(key, raising=False)
     monkeypatch.setattr(
         answer_service,
         "retrieve_chunks",
-        lambda **kwargs: sample_chunks(),
+        lambda **_kwargs: sample_chunks(),
     )
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
 
-    with pytest.raises(AnswerServiceError, match="GEMINI_API_KEY"):
-        answer_question(
-            query="What were the sales?",
-            dataset_id="dataset-1",
-        )
+    with pytest.raises(AnswerServiceError) as error:
+        answer_question(query="What were sales?", dataset_id="dataset-1")
+
+    assert error.value.code == "LLM_PROVIDER_NOT_CONFIGURED"
 
 
-def test_answer_question_returns_gemini_answer(monkeypatch):
-    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
-    monkeypatch.setenv("GEMINI_MODEL", "test-model")
-
+def test_answer_question_returns_grounded_answer_and_provider(monkeypatch):
     monkeypatch.setattr(
         answer_service,
         "retrieve_chunks",
-        lambda **kwargs: sample_chunks(),
+        lambda **_kwargs: sample_chunks(),
     )
+    prompts = []
 
-    class FakeResponse:
-        text = "January sales revenue was 50000 rupees."
+    def fake_generate_text(*, system_prompt="", user_prompt):
+        prompts.append((system_prompt, user_prompt))
+        return "January sales revenue was 50000 rupees.", "groq"
 
-    class FakeModels:
-        def generate_content(self, **kwargs):
-            assert kwargs["model"] == "test-model"
-            assert "January sales revenue was 50000 rupees" in kwargs["contents"]
-            return FakeResponse()
-
-    class FakeClient:
-        def __init__(self, api_key):
-            assert api_key == "test-key"
-            self.models = FakeModels()
-
-    monkeypatch.setattr(answer_service.genai, "Client", FakeClient)
-
-    result = answer_question(
-        query="What were the sales?",
-        dataset_id="dataset-1",
-    )
+    monkeypatch.setattr(answer_service, "generate_text", fake_generate_text)
+    result = answer_question(query="What were the sales?", dataset_id="dataset-1")
 
     assert result["status"] == "success"
     assert result["answer"] == "January sales revenue was 50000 rupees."
+    assert result["llm_provider"] == "groq"
     assert result["sources"][0]["chunk_id"] == "chunk-1"
-
-
-def test_answer_question_handles_gemini_failure(monkeypatch):
-    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
-    monkeypatch.setattr(
-        answer_service,
-        "retrieve_chunks",
-        lambda **kwargs: sample_chunks(),
-    )
-
-    class FakeClient:
-        def __init__(self, api_key):
-            self.models = self
-
-        def generate_content(self, **kwargs):
-            raise RuntimeError("Simulated provider failure")
-
-    monkeypatch.setattr(answer_service.genai, "Client", FakeClient)
-
-    with pytest.raises(AnswerServiceError, match="Gemini request failed"):
-        answer_question(
-            query="What were the sales?",
-            dataset_id="dataset-1",
-        )
+    assert "January sales revenue was 50000 rupees." in prompts[0][1]
 
 
 def test_chat_answer_passes_selected_evidence_graph_and_history(monkeypatch):
-    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
-    monkeypatch.setenv("GEMINI_MODEL", "test-model")
     selected_ids = ["sheet-a", "sheet-b"]
     retrieved_ids = []
 
@@ -140,25 +89,15 @@ def test_chat_answer_passes_selected_evidence_graph_and_history(monkeypatch):
         ]
 
     monkeypatch.setattr(answer_service, "retrieve_chunks_for_datasets", retrieve)
-
-    class FakeResponse:
-        text = "Revenue is supported by the second sheet."
-
-    class FakeModels:
-        def generate_content(self, **kwargs):
-            prompt = kwargs["contents"]
-            assert '"relationship":"candidate"' in prompt
-            assert '"content":"Earlier question"' in prompt
-            assert "Dataset ID: sheet-b" in prompt
-            assert "private-sample-value" not in prompt
-            assert "unretrieved-secret" not in prompt
-            return FakeResponse()
-
-    class FakeClient:
-        def __init__(self, api_key):
-            self.models = FakeModels()
-
-    monkeypatch.setattr(answer_service.genai, "Client", FakeClient)
+    prompts = []
+    monkeypatch.setattr(
+        answer_service,
+        "generate_text",
+        lambda **kwargs: (
+            prompts.append(kwargs) or "Revenue is supported by the second sheet.",
+            "gemini",
+        ),
+    )
 
     result = answer_service.answer_question(
         query="Compare revenue",
@@ -184,19 +123,34 @@ def test_chat_answer_passes_selected_evidence_graph_and_history(monkeypatch):
                 },
             ],
         },
-        conversation_history=[
-            {"role": "user", "content": "Earlier question"}
-        ],
+        conversation_history=[{"role": "user", "content": "Earlier question"}],
     )
 
+    prompt = prompts[0]["user_prompt"]
     assert retrieved_ids == selected_ids
     assert result["dataset_ids"] == selected_ids
     assert result["sources"][0]["dataset_id"] == "sheet-b"
     assert result["sources"][0]["graph_matches"][0]["sql_name"] == "revenue"
-    assert result["graph_retrieval"]["matched_columns"][0]["sql_name"] == (
-        "revenue"
+    assert "Earlier question" in prompt
+    assert "private-sample-value" not in prompt
+    assert "unretrieved-secret" not in prompt
+
+
+def test_chat_answer_fails_if_mandatory_graph_retrieval_fails(monkeypatch):
+    monkeypatch.setattr(
+        answer_service,
+        "retrieve_chunks_for_datasets",
+        lambda **_kwargs: sample_chunks(),
     )
-    assert "sample_values" not in result["graph_retrieval"]["matched_columns"][0]
+
+    with pytest.raises(AnswerServiceError) as error:
+        answer_service.answer_question(
+            query="Compare revenue",
+            dataset_ids=["dataset-1"],
+            graph_context={"nodes": [], "edges": []},
+        )
+
+    assert error.value.code == "GRAPH_RETRIEVAL_FAILED"
 
 
 @pytest.mark.parametrize("dataset_ids", [[], ["sheet-a", ""], "sheet-a"])

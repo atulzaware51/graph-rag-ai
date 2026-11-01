@@ -3,20 +3,20 @@
 
 :root {
   font-family: Inter, "Segoe UI", Arial, sans-serif;
-  color: #202938;
-  background: #f6f7f9;
+  color: #17263d;
+  background: #f3f6fb;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 
-  --color-primary: #3869bd;
-  --color-text: #202938;
-  --color-muted: #7d899a;
-  --color-border: #e3e7ed;
+  --color-primary: #2458b8;
+  --color-text: #17263d;
+  --color-muted: #65748b;
+  --color-border: #dce4ef;
   --color-surface: #ffffff;
-  --color-background: #f6f7f9;
-  --color-sidebar: #202833;
+  --color-background: #f3f6fb;
+  --color-sidebar: #0c1a30;
 }
 
 * {
@@ -57,7 +57,7 @@ button:focus-visible,
 input:focus-visible,
 textarea:focus-visible,
 select:focus-visible {
-  outline: 2px solid #6b94d6;
+  outline: 2px solid #2458b8;
   outline-offset: 3px;
 }
 

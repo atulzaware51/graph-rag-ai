@@ -406,20 +406,48 @@ def build_graph_retrieval_context(
             if key != "sample_values"
         }
 
+    matched_columns = [
+        column_summary(columns_by_key[key])
+        for key in columns_by_key
+        if key in matched_keys
+    ]
+    related_columns = [
+        column_summary(columns_by_key[key])
+        for key in columns_by_key
+        if key in relevant_keys and key not in matched_keys
+    ]
+    evidence_nodes = []
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        if node.get("type") != "Evidence" or node.get("dataset_id") not in selected_ids:
+            continue
+        evidence_text = node.get("text")
+        if not isinstance(evidence_text, str) or not evidence_text.strip():
+            continue
+        evidence_tokens = set(tokenize(evidence_text))
+        if not query_tokens.intersection(evidence_tokens):
+            continue
+        metadata = node.get("metadata", {})
+        evidence_nodes.append(
+            {
+                "id": node.get("id"),
+                "dataset_id": node.get("dataset_id"),
+                "chunk_id": node.get("chunk_id"),
+                "chunk_index": node.get("chunk_index"),
+                "text": evidence_text,
+                "metadata": metadata if isinstance(metadata, dict) else {},
+            }
+        )
+
     context["retrieval"] = {
-        "matched_columns": [
-            column_summary(columns_by_key[key])
-            for key in columns_by_key
-            if key in matched_keys
-        ],
-        "related_columns": [
-            column_summary(columns_by_key[key])
-            for key in columns_by_key
-            if key in relevant_keys and key not in matched_keys
-        ],
+        "matched_columns": matched_columns,
+        "related_columns": related_columns,
         "relevant_columns": [
             column_summary(column) for column in relevant_columns
         ],
         "matched_relationships": matched_relationships,
+        "matched_evidence": evidence_nodes,
+        "graph_available": bool(matched_columns or related_columns or matched_relationships or evidence_nodes),
     }
     return context

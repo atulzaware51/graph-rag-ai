@@ -20,7 +20,7 @@ async function request(endpoint, options = {}) {
   } catch {
     throw new Error(
       'Cannot connect to GraphSheet AI API. ' +
-        'Check that the backend is running on port 8000.'
+        'Check that the backend is running on port 8001.'
     );
   }
 

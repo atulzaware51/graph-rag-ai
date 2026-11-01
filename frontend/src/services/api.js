@@ -8,7 +8,7 @@ async function request(endpoint, options = {}) {
     response = await fetch(`${API_BASE_URL}${endpoint}`, options)
   } catch {
     throw new Error(
-      'Cannot connect to the API. Check that FastAPI is running on port 8000.',
+      'Cannot connect to the API. Check that FastAPI is running on port 8001.',
     )
   }
 
@@ -25,10 +25,14 @@ async function request(endpoint, options = {}) {
   }
 
   if (!response.ok) {
-    const detail =
+    const rawDetail =
       typeof data === 'object' && data !== null
         ? data.detail || data.message
         : data
+    const detail =
+      typeof rawDetail === 'object' && rawDetail !== null
+        ? rawDetail.message || rawDetail.code
+        : rawDetail
 
     throw new Error(
       detail
@@ -159,7 +163,12 @@ export function updateConversationDatasets(conversationId, datasetIds) {
   )
 }
 
-export function askConversation(conversationId, query, topK = 5) {
+export function askConversation(
+  conversationId,
+  query,
+  topK = 5,
+  requestId = crypto.randomUUID(),
+) {
   if (!conversationId) {
     throw new Error('Create a chat before asking a question.')
   }
@@ -171,7 +180,11 @@ export function askConversation(conversationId, query, topK = 5) {
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query: query.trim(), top_k: topK }),
+      body: JSON.stringify({
+        query: query.trim(),
+        top_k: topK,
+        request_id: requestId,
+      }),
     },
   )
 }
@@ -362,7 +375,7 @@ export function uploadDataset(file, onProgress) {
     xhr.addEventListener('error', () => {
       reject(
         new Error(
-          'Cannot connect to the API. Check that FastAPI is running on port 8000.',
+          'Cannot connect to the API. Check that FastAPI is running on port 8001.',
         ),
       )
     })
