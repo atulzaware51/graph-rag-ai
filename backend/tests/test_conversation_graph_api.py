@@ -17,6 +17,53 @@ from backend.app.services import conversation_store
 client = TestClient(app)
 
 
+def test_answer_history_includes_selected_sql_results_only():
+    history = conversations_api._answer_history(
+        {
+            "events": [
+                {
+                    "event_type": "message",
+                    "actor": "user",
+                    "message": "Show sales.",
+                    "metadata": {"dataset_ids": ["sheet-a"]},
+                },
+                {
+                    "event_type": "sql",
+                    "actor": "assistant",
+                    "event_id": "query-a",
+                    "message": "Generated SQL",
+                    "metadata": {
+                        "dataset_ids": ["sheet-a"],
+                        "question": "What is total sales?",
+                        "sql": 'SELECT SUM("sales") FROM "dataset_a"',
+                    },
+                },
+                {
+                    "event_type": "result_reference",
+                    "event_id": "result-a",
+                    "metadata": {
+                        "query_id": "query-a",
+                        "columns": ["total"],
+                        "rows": [{"total": 42}],
+                        "row_count": 1,
+                    },
+                },
+                {
+                    "event_type": "message",
+                    "actor": "assistant",
+                    "message": "Old-sheet answer.",
+                    "metadata": {"dataset_ids": ["sheet-b"]},
+                },
+            ]
+        },
+        ["sheet-a"],
+    )
+
+    assert len(history) == 2
+    assert '"total":42' in history[1]["content"]
+    assert "Old-sheet answer" not in str(history)
+
+
 def test_conversation_graph_endpoint_returns_persisted_chat_history(
     tmp_path,
     monkeypatch,
@@ -255,7 +302,7 @@ def test_chat_question_request_replays_persisted_answer_without_regeneration(
     }
 
 
-def test_graph_failure_keeps_user_message_and_returns_retryable_error(
+def test_graph_failure_falls_back_to_selected_sheet_chunks(
     monkeypatch,
 ):
     dataset_ids = ["a" * 32]
@@ -299,7 +346,16 @@ def test_graph_failure_keeps_user_message_and_returns_retryable_error(
             )
         ),
     )
-
+    monkeypatch.setattr(
+        conversations_api,
+        "answer_question",
+        lambda **_kwargs: {
+            "status": "success",
+            "answer": "Grounded answer from selected-sheet chunks.",
+            "sources": [{"chunk_id": "chunk-1", "dataset_id": dataset_ids[0]}],
+            "graph_retrieval": {"graph_available": False},
+        },
+    )
     response = client.post(
         "/conversations/chat-a/ask",
         json={
@@ -308,9 +364,10 @@ def test_graph_failure_keeps_user_message_and_returns_retryable_error(
         },
     )
 
-    assert response.status_code == 503
-    assert response.json()["detail"]["code"] == "GRAPH_RETRIEVAL_FAILED"
-    assert response.json()["detail"]["retryable"] is True
+    assert response.status_code == 200
+    assert response.json()["answer"] == "Grounded answer from selected-sheet chunks."
+    assert response.json()["graph_store"] == "unavailable"
+    assert response.json()["sources"][0]["chunk_id"] == "chunk-1"
     assert recorded[0]["actor"] == "user"
     assert recorded[0]["idempotency_key"] == "ask:request-retry:question"
 

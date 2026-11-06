@@ -147,6 +147,7 @@ def profile_dataset(
         return {
             "dataset_id": dataset_id,
             "filename": dataset.get("filename"),
+            "sheet_name": dataset.get("sheet_name"),
             "table_name": table_name,
             "row_count": row_count,
             "column_count": len(columns),

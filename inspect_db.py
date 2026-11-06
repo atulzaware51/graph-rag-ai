@@ -1,3 +1,5 @@
+"""Print the SQLite database's tables, schemas, and column names for inspection."""
+
 import sqlite3
 from pathlib import Path
 

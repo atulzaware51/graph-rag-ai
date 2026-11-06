@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+import json
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
@@ -47,9 +48,16 @@ from backend.app.services.text_to_sql_service import (
     TextToSQLError,
     ask_with_sql,
 )
+from backend.app.services.sql_analysis_service import (
+    SQLAnalysisError,
+    generate_analysis,
+    get_sql_analysis_context,
+    persisted_analysis,
+)
 
 router = APIRouter(prefix="/conversations", tags=["Conversations"])
 logger = logging.getLogger(__name__)
+_ANALYST_SQL_SURFACE = "analyst_sql"
 
 
 class CreateConversationRequest(BaseModel):
@@ -79,6 +87,14 @@ class ChatSQLRequest(BaseModel):
     """Chat-scoped natural-language SQL payload."""
 
     question: str = Field(min_length=1, max_length=2000)
+
+
+class ChatSQLAnalysisRequest(BaseModel):
+    """Multi-query, chat-scoped SQL analysis payload."""
+
+    question: str = Field(min_length=1, max_length=2000)
+    request_id: str | None = Field(default=None, min_length=1, max_length=128)
+    mode: Literal["analysis", "code_generation"] = "analysis"
 
 
 class EventRequest(BaseModel):
@@ -390,6 +406,112 @@ def _selected_graph_context(
     }
 
 
+def _answer_history(
+    conversation: dict[str, Any],
+    dataset_ids: list[str],
+) -> list[dict[str, str]]:
+    """Build bounded chat context without carrying results from unselected sheets."""
+    events = conversation.get("events", [])
+    selected_ids = set(dataset_ids)
+    sql_results = {
+        event.get("metadata", {}).get("query_id"): event.get("metadata", {})
+        for event in events
+        if event.get("event_type") == "result_reference"
+        and isinstance(event.get("metadata"), dict)
+        and event.get("metadata", {}).get("query_id")
+    }
+    history = []
+    for event in events:
+        metadata = event.get("metadata", {})
+        metadata = metadata if isinstance(metadata, dict) else {}
+        event_dataset_ids = metadata.get("dataset_ids")
+        if (
+            isinstance(event_dataset_ids, list)
+            and event_dataset_ids
+            and not set(event_dataset_ids).issubset(selected_ids)
+        ):
+            continue
+
+        if (
+            event.get("event_type") == "message"
+            and event.get("actor") in {"user", "assistant"}
+            and event.get("message")
+        ):
+            history.append(
+                {
+                    "role": event["actor"],
+                    "content": event["message"],
+                }
+            )
+        elif (
+            event.get("event_type") == "sql"
+            and isinstance(metadata.get("sql"), str)
+        ):
+            result = sql_results.get(event.get("event_id"), {})
+            history.append(
+                {
+                    "role": "assistant",
+                    "content": json.dumps(
+                        {
+                            "sql_studio_question": metadata.get("question"),
+                            "sql": metadata["sql"],
+                            "status": metadata.get("status", "success"),
+                            "result": {
+                                "columns": result.get("columns", []),
+                                "rows": result.get("rows", []),
+                                "row_count": result.get("row_count"),
+                            },
+                        },
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                        default=str,
+                    ),
+                }
+            )
+    return history[-20:]
+
+
+def _selected_graph_context_or_empty(
+    conversation_id: str,
+    dataset_ids: list[str],
+    *,
+    include_evidence: bool = False,
+    include_history: bool = False,
+) -> dict[str, Any]:
+    """Keep sheet-chunk analysis available when graph retrieval is unavailable."""
+    try:
+        return _selected_graph_context(
+            conversation_id,
+            dataset_ids,
+            include_evidence=include_evidence,
+            include_history=include_history,
+        )
+    except ConversationStoreError as exc:
+        if not (
+            exc.code
+            and (
+                exc.code.startswith("GRAPH_")
+                or exc.code.startswith("NEO4J_")
+            )
+        ):
+            raise
+        logger.warning(
+            "Graph retrieval failed for conversation %s (code=%s); "
+            "continuing with selected-sheet chunks.",
+            conversation_id,
+            exc.code,
+        )
+        return {
+            "conversation_id": conversation_id,
+            "nodes": [],
+            "edges": [],
+            "candidate_relationships": [],
+            "graph_store": "unavailable",
+            "graph_error": exc.code,
+            "relationship_note": "Knowledge graph context is unavailable.",
+        }
+
+
 @router.post("/{conversation_id}/ask")
 def ask_conversation_question(
     conversation_id: str,
@@ -445,16 +567,7 @@ def ask_conversation_question(
                         },
                     }
 
-        history = [
-            {
-                "role": event["actor"],
-                "content": event["message"],
-            }
-            for event in conversation["events"]
-            if event["event_type"] == "message"
-            and event["actor"] in {"user", "assistant"}
-            and event["message"]
-        ][-20:]
+        history = _answer_history(conversation, dataset_ids)
 
         user_event = record_message(
             conversation_id,
@@ -475,7 +588,7 @@ def ask_conversation_question(
                 else None
             ),
         )
-        graph_context = _selected_graph_context(
+        graph_context = _selected_graph_context_or_empty(
             conversation_id,
             dataset_ids,
             include_evidence=True,
@@ -617,7 +730,7 @@ def run_conversation_sql(
         for dataset_id in dataset_ids:
             get_dataset_details(dataset_id)
 
-        graph_context = _selected_graph_context(
+        graph_context = _selected_graph_context_or_empty(
             conversation_id,
             dataset_ids,
             include_evidence=True,
@@ -641,6 +754,8 @@ def run_conversation_sql(
                 "question": request.question,
                 "dataset_id": dataset_ids[0],
                 "dataset_ids": dataset_ids,
+                "llm_provider": result.get("llm_provider"),
+                "llm_model": result.get("llm_model"),
                 "read_columns": result["result"].get("read_columns", []),
                 "read_column_refs": result["result"].get(
                     "read_column_refs", []
@@ -671,7 +786,7 @@ def run_conversation_sql(
                 "row_count": result["result"]["row_count"],
             },
         )
-        _selected_graph_context(
+        _selected_graph_context_or_empty(
             conversation_id,
             dataset_ids,
             include_evidence=True,
@@ -766,6 +881,341 @@ def run_conversation_sql(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Could not complete chat SQL analysis.",
+        ) from exc
+
+
+def _analyst_sql_approved_relationships(
+    conversation: dict[str, Any],
+    dataset_ids: list[str],
+) -> set[str]:
+    """Return only SQL relationship approvals still scoped to selected sheets."""
+    selected_ids = set(dataset_ids)
+    return {
+        metadata["relationship_id"]
+        for event in conversation.get("events", [])
+        if event.get("event_type") == "sql_relationship"
+        and (metadata := event.get("metadata", {})).get("surface")
+        == _ANALYST_SQL_SURFACE
+        and metadata.get("approved") is True
+        and set(metadata.get("dataset_ids", [])) <= selected_ids
+        and isinstance(metadata.get("relationship_id"), str)
+    }
+
+
+@router.get("/{conversation_id}/sql-relationships")
+def get_conversation_sql_relationships(conversation_id: str):
+    """Return relationship candidates scoped to this chat's selected sheets."""
+    try:
+        conversation = get_conversation(conversation_id)
+        dataset_ids = validate_dataset_ids(
+            conversation["selected_dataset_ids"]
+        )
+        if len(dataset_ids) < 2:
+            return {"relationships": []}
+        context = get_sql_analysis_context(
+            dataset_ids,
+            approved_relationship_ids=_analyst_sql_approved_relationships(
+                conversation,
+                dataset_ids,
+            ),
+        )
+        return {
+            "relationships": [
+                *context["relationships"],
+                *context["verified_relationships"],
+            ]
+        }
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    except (ConversationStoreError, SQLAnalysisError) as exc:
+        logger.exception(
+            "Could not load SQL relationships for conversation %s.",
+            conversation_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Could not load SQL relationship options.",
+        ) from exc
+
+
+@router.post(
+    "/{conversation_id}/sql-relationships/{relationship_id}/approval"
+)
+def approve_conversation_sql_relationship(
+    conversation_id: str,
+    relationship_id: str,
+):
+    """Record user approval for a heuristic join candidate in this chat."""
+    try:
+        conversation = get_conversation(conversation_id)
+        dataset_ids = validate_dataset_ids(
+            conversation["selected_dataset_ids"]
+        )
+        context = get_sql_analysis_context(dataset_ids)
+        relationship = next(
+            (
+                item
+                for item in context["relationships"]
+                if item["relationship_id"] == relationship_id
+            ),
+            None,
+        )
+        if relationship is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Relationship candidate is no longer available.",
+            )
+        if not relationship["join_safe"]:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    "This many-to-many candidate cannot be approved because "
+                    "its keys are not unique on either side."
+                ),
+            )
+        event = record_event(
+            conversation_id,
+            "sql_relationship",
+            actor="user",
+            message="Approved heuristic relationship for SQL analysis",
+            metadata={
+                "surface": _ANALYST_SQL_SURFACE,
+                "relationship_id": relationship_id,
+                "dataset_ids": [
+                    relationship["left"]["dataset_id"],
+                    relationship["right"]["dataset_id"],
+                ],
+                "approved": True,
+            },
+        )
+        return {"status": "success", "event": event}
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    except (ConversationStoreError, SQLAnalysisError) as exc:
+        logger.exception(
+            "Could not approve SQL relationship for conversation %s.",
+            conversation_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Could not approve this SQL relationship.",
+        ) from exc
+
+
+@router.post("/{conversation_id}/sql-analysis")
+def run_conversation_sql_analysis(
+    conversation_id: str,
+    request: ChatSQLAnalysisRequest,
+):
+    """Generate and run multiple independent SQL results in Analyst chat."""
+    try:
+        conversation = get_conversation(conversation_id)
+        dataset_ids = validate_dataset_ids(
+            conversation["selected_dataset_ids"]
+        )
+        if not dataset_ids:
+            raise ValueError("Select at least one dataset for this chat.")
+        for dataset_id in dataset_ids:
+            get_dataset_details(dataset_id)
+
+        answer_key = (
+            f"sql-analysis:{request.request_id}:answer"
+            if request.request_id
+            else None
+        )
+        if answer_key:
+            cached_event = get_event_by_idempotency_key(
+                conversation_id,
+                answer_key,
+            )
+            if cached_event is not None:
+                cached_metadata = cached_event.get("metadata", {})
+                cached_analysis = cached_metadata.get("sql_analysis")
+                if (
+                    cached_metadata.get("dataset_ids") != dataset_ids
+                    or cached_metadata.get("question") != request.question
+                    or cached_metadata.get("mode", "analysis") != request.mode
+                ):
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=(
+                            "This request ID was already used for a different "
+                            "question or dataset selection."
+                        ),
+                    )
+                if isinstance(cached_analysis, dict):
+                    return {
+                        "status": "success",
+                        "analysis": cached_analysis,
+                        "conversation_id": conversation_id,
+                        "events": {"assistant": cached_event["event_id"]},
+                    }
+
+        user_event = record_message(
+            conversation_id,
+            actor="user",
+            message=request.question,
+            metadata={
+                "dataset_ids": dataset_ids,
+                "intent": (
+                    "sql_code_generation"
+                    if request.mode == "code_generation"
+                    else "sql_analysis"
+                ),
+                "mode": request.mode,
+                "request_id": request.request_id,
+            },
+            idempotency_key=(
+                f"sql-analysis:{request.request_id}:question"
+                if request.request_id
+                else None
+            ),
+        )
+        prior_analyses = [
+            event.get("metadata", {}).get("sql_analysis")
+            for event in conversation.get("events", [])
+            if event.get("event_type") == "message"
+            and event.get("actor") == "assistant"
+            and event.get("metadata", {}).get("intent") == "sql_analysis"
+        ]
+        prior_analyses = [
+            item
+            for item in prior_analyses
+            if isinstance(item, dict)
+            and item.get("selected_dataset_ids") == dataset_ids
+        ]
+        context = [
+            {
+                "prompt": item.get("original_prompt", ""),
+                "queries": [
+                    {"title": query.get("title", ""), "sql": query.get("sql", "")}
+                    for query in item.get("queries", [])
+                ],
+            }
+            for item in prior_analyses[-3:]
+        ]
+        analysis = generate_analysis(
+            request.question,
+            dataset_ids,
+            mode=request.mode,
+            approved_relationship_ids=(
+                _analyst_sql_approved_relationships(
+                    conversation,
+                    dataset_ids,
+                )
+                if request.mode == "analysis"
+                else set()
+            ),
+            conversation_context=context,
+        )
+        successful_count = sum(
+            query.get("execution_status") == "success"
+            for query in analysis["queries"]
+        )
+        if analysis.get("clarification"):
+            message = analysis["clarification"]
+        elif analysis.get("mode") == "code_generation":
+            message = (
+                f'{analysis["analysis_title"]}: generated '
+                f'{len(analysis["queries"])} SQL code block(s); none executed.'
+            )
+        else:
+            message = (
+                f'{analysis["analysis_title"]}: generated '
+                f'{len(analysis["queries"])} result tables; '
+                f'{successful_count} completed successfully.'
+            )
+        assistant_event = record_message(
+            conversation_id,
+            actor="assistant",
+            message=message,
+            metadata={
+                "dataset_ids": dataset_ids,
+                "intent": (
+                    "sql_code_generation"
+                    if request.mode == "code_generation"
+                    else "sql_analysis"
+                ),
+                "mode": request.mode,
+                "question": request.question,
+                "request_id": request.request_id,
+                "status": analysis["status"],
+                "sql_analysis": persisted_analysis(analysis),
+            },
+            idempotency_key=answer_key,
+        )
+        return {
+            "status": "success",
+            "analysis": analysis,
+            "conversation_id": conversation_id,
+            "events": {
+                "user": user_event["event_id"],
+                "assistant": assistant_event["event_id"],
+            },
+        }
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    except DatasetNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="A selected dataset no longer exists.",
+        ) from exc
+    except SQLAnalysisError as exc:
+        try:
+            record_message(
+                conversation_id,
+                actor="assistant",
+                message=f"SQL analysis failed: {exc}",
+                metadata={
+                    "intent": (
+                        "sql_code_generation"
+                        if request.mode == "code_generation"
+                        else "sql_analysis"
+                    ),
+                    "mode": request.mode,
+                    "question": request.question,
+                    "request_id": request.request_id,
+                    "status": "failed",
+                },
+            )
+        except ConversationStoreError:
+            logger.exception(
+                "Could not persist SQL analysis failure for conversation %s.",
+                conversation_id,
+            )
+        raise HTTPException(
+            status_code=(
+                status.HTTP_503_SERVICE_UNAVAILABLE
+                if exc.retryable
+                else status.HTTP_502_BAD_GATEWAY
+                if exc.code != "SQL_STUDIO_ERROR"
+                else status.HTTP_422_UNPROCESSABLE_ENTITY
+            ),
+            detail={"code": exc.code, "message": str(exc)},
+        ) from exc
+    except ConversationStoreError as exc:
+        if exc.code == "IDEMPOTENCY_CONFLICT":
+            error_status = status.HTTP_409_CONFLICT
+        elif str(exc) == "Conversation not found.":
+            error_status = status.HTTP_404_NOT_FOUND
+        elif exc.code == "SQLITE_BUSY":
+            error_status = status.HTTP_503_SERVICE_UNAVAILABLE
+        else:
+            error_status = status.HTTP_500_INTERNAL_SERVER_ERROR
+        raise HTTPException(
+            status_code=error_status,
+            detail=str(exc),
         ) from exc
 
 

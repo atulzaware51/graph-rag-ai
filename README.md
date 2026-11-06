@@ -1,21 +1,30 @@
 # GraphSheet AI
 
-GraphSheet AI is a spreadsheet analysis application built with FastAPI, SQLite or PostgreSQL, SQLAlchemy, Pandas, Gemini/Groq/Mistral, and LangGraph. It ingests CSV/XLSX files, profiles and previews their data, persists dataset knowledge graphs and conversation history, retrieves graph-backed evidence for answers, and generates chat-scoped read-only SQL.
+GraphSheet AI is a spreadsheet analysis application built with FastAPI, SQLite or PostgreSQL, SQLAlchemy, Neo4j, ChromaDB, Pandas, Gemini/Groq/Mistral, and LangGraph. It ingests CSV/XLSX files, profiles and previews their data, persists dataset knowledge graphs and conversation history, retrieves graph-backed evidence for answers, and generates chat-scoped read-only SQL.
 
+## ARCHITECTURE
+![alt text](image.png)
 ## Features
 
 - Upload CSV, XLS, and XLSX files (maximum 10 MB) with server-generated temporary filenames and validated spreadsheet structure.
-- Store each dataset, its column metadata, and searchable text chunks in SQLite.
+- Expose each Excel worksheet as a separately selectable dataset; reuse a previously stored dataset when its normalized sheet-content fingerprint matches.
+- Store dataset rows, schema, searchable text chunks, and an embedding cache in SQLite; index evidence embeddings in a persistent local ChromaDB collection.
 - List datasets, inspect column profiles, and preview up to 100 rows.
-- Ask evidence-backed questions using keyword-ranked chunks and configured LLM providers with bounded failover.
+- Ask evidence-backed questions using hybrid local-vector, keyword, and knowledge-graph retrieval with configured LLM providers; calculation, filter, ranking, and ordering questions use selected-sheet read-only SQL even when evidence chunks match.
+- Return validated structured tables for supported deterministic counts, sums, averages, rankings, and record lookups, as well as SQL-assisted Analyst answers.
 - Generate SQL and execute bounded, read-only queries against only the sheets selected in the active chat (up to five).
+- Generate multiple independent, read-only SQL result tables directly in AI Analyst from one natural-language request; each result shows its SQL, status, and rows in the same persistent chat.
+- Generate SQL code, including DDL, separately from SQL analysis; generated code is displayed for review and copying and is never executed against uploaded sheets.
 - Build dataset, profiled column, and evidence-chunk nodes, with candidate cross-dataset relationships based on similar column names and shared values.
 - Show a timestamped graph preview for each uploaded sheet in Overview, limited to the sheet and its entity/column nodes.
 - Delete a dataset with its graph inputs, searchable chunks, and dataset-linked conversation/query history; deleting a chat in the web interface removes only that chat and its local history.
-- Persist chat messages, selected-sheet links, SQL query events, evidence references, and query results in SQLite. Dataset graph nodes, directed edges, evidence provenance, and build records are stored in the database selected by `DATABASE_URL`; local development defaults to SQLite, and PostgreSQL is supported for production graph storage.
+- Persist chat messages, selected-sheet links, SQL query events, evidence references, and query results in SQLite. Dataset graph nodes and directed edges use Neo4j when configured, with the SQL graph store as an availability fallback; otherwise they use the database selected by `DATABASE_URL` (SQLite by default, PostgreSQL supported).
 - Use chat-scoped RAG and SQL endpoints that supply selected-sheet graph context and recent chat history to generation; retrieval and SQL access are restricted to the chat's selected sheets.
-- Chat RAG retrieves its source evidence from selected-sheet `Evidence` nodes in the graph projection, guided by matching column nodes and their candidate relationship neighbors. The graph is rebuilt from SQLite when Neo4j is not configured. Answers report source chunk IDs and matched columns; candidate relationships remain heuristic.
+- Preserve selected-sheet conversational context, including prior SQL results, for follow-up questions; exclude past answers tied to sheets that are no longer selected.
+- Chat RAG retrieves selected-sheet evidence from ChromaDB and uses graph `Evidence` nodes, matching column nodes, and candidate relationship neighbors as context. ChromaDB is a vector index, not a graph database. The knowledge graph is stored in Neo4j when configured and rebuilt from SQLite dataset records; if Neo4j is unavailable, the configured SQL graph store is used as a fallback. Answers report source chunk IDs and matched columns; candidate relationships remain heuristic.
 - Text-to-SQL receives question-matched columns and selected-sheet candidate relationships from the graph, then runs only against the selected SQLite tables using the read-only SQL safety layer.
+- SQL code generation uses the active chat's selected-sheet schemas as context, but does not execute generated statements. SQL analysis remains limited to independently validated, read-only SELECT queries.
+- Multi-query Analyst SQL analysis is stored with the existing conversation messages and bounded result snapshots; no schema migration is required. Each query executes separately, so a failed query does not discard successful sibling results. Heuristic joins require explicit approval; declared SQLite foreign keys are verified automatically.
 - Use the framework-free web interface at `/app/` or the OpenAPI interface at `/docs`.
 
 ## Architecture and limitations
@@ -23,9 +32,9 @@ GraphSheet AI is a spreadsheet analysis application built with FastAPI, SQLite o
 
 - FastAPI routes are in `backend/app/api/`; persistence, ingestion, retrieval, profiling, SQL, and graph logic are in `backend/app/services/`.
 - SQLite creates its metadata tables when the first dataset is stored. The default database path is `data/graphsheet.db`; run commands from the repository root.
-- RAG retrieval is deterministic keyword overlap, not vector search. Retrieval splits underscored column names and normalizes common plurals so natural-language questions can match spreadsheet headers. Uploaded rows remain in SQLite tables; their chunked text and source-row metadata are projected as graph `Evidence` nodes linked to their `Dataset` nodes. The configured LLM receives retrieved evidence and graph context as the basis for factual answers.
-- Selected-sheet graphs include schema profiles, candidate relationships, and chunk text with source-row metadata as `Evidence` nodes. Graph builds are written transactionally to the persistent database and graph reads use that database rather than Neo4j. Conversation messages, SQL, execution records, and result references remain in the SQLite conversation graph; legacy optional Neo4j conversation synchronization is separate from dataset graph storage. Full spreadsheet tables remain in SQLite, where the read-only SQL engine executes queries.
-- AI Analyst and SQL Studio use `LLM_PROVIDER` followed by `LLM_FALLBACK_PROVIDERS`; missing provider keys are skipped. Gemini, Groq, and Mistral calls have a 30-second timeout and at most three attempts per configured provider for rate limits, temporary provider errors, and transport timeouts. Exhausted-provider errors identify each provider's failure category without returning credentials or raw provider response bodies. SQL is still independently validated and executed with the existing read-only safety layer. Conversation event writes use SQLite WAL, a bounded busy timeout, short immediate transactions, and request idempotency keys so retrying a completed chat request does not regenerate the answer.
+- RAG retrieval combines ChromaDB cosine similarity over locally generated sentence embeddings with keyword overlap and matching graph columns. Vectors are stored in the persistent collections named `graphsheet_evidence_<dimensions>` under `CHROMA_PERSIST_DIRECTORY` (default `data/chroma`), filtered by selected dataset IDs. SQLite retains the source chunks and a float32 embedding cache so Chroma can be rebuilt if needed. Older datasets are indexed in Chroma on first selected-sheet retrieval. The default model is `sentence-transformers/all-MiniLM-L6-v2` (384 dimensions); configure `EMBEDDING_MODEL` to use another compatible local sentence-transformers model. First use may download the model; afterward its Hugging Face cache can be used offline. If embeddings cannot be generated or searched, the operation reports an error rather than silently reverting to keyword-only retrieval. Uploaded rows remain in SQLite tables, and chunk text, source rows, columns, and file/sheet labels are represented as graph `Evidence` nodes linked to their `Dataset` nodes.
+- Selected-sheet graphs include schema profiles, candidate relationships, and evidence provenance. When Neo4j is configured, dataset graph nodes, edges, and build markers are stored there and graph reads prefer Neo4j; the database selected by `DATABASE_URL` is used when Neo4j is not configured or unavailable. Existing datasets are rebuilt into Neo4j when graph endpoints or chat retrieval next build the graph. Conversation messages, SQL, executions, and result references remain in SQLite. Full spreadsheet tables remain in SQLite, where the read-only SQL engine executes queries.
+- AI Analyst SQL generation uses `LLM_PROVIDER` followed by `LLM_FALLBACK_PROVIDERS`; missing provider keys are skipped. Gemini, Groq, and Mistral calls have a 30-second timeout and at most two attempts per configured provider for transient rate limits, temporary provider errors, and transport timeouts. Provider quota exhaustion, authentication failure, model unavailability, and malformed responses are reported separately without returning credentials or raw provider response bodies. Generated SQL is independently validated and executed with the existing read-only safety layer. Conversation and graph writes use SQLite WAL, a bounded busy timeout, short transactions, and bounded retries for SQLite lock contention. Conversation event writes also use request idempotency keys so retrying a completed chat request does not regenerate the answer.
 - The Aura URI, username, and password are blank in `.env.example`; the app cannot connect to the user's instance until they are filled in locally. `AURA_INSTANCEID` and `AURA_INSTANCENAME` are optional dashboard metadata and are not used to authenticate.
 - Relationships are heuristic **candidates**, not verified foreign keys or approved relationships. They require matching names and overlapping values.
 - Schema profiling computes per-column distinct counts; large/complex datasets may take time even within the upload limits.
@@ -42,7 +51,7 @@ From the repository root:
 if (!(Test-Path .env)) { Copy-Item .env.example .env }
 ```
 
-Edit `.env` and set one or more provider API keys. The default order is Gemini, then Groq, then Mistral; providers without keys are skipped. Set `LLM_PROVIDER` to choose the primary provider and `LLM_FALLBACK_PROVIDERS` to change the fallback order. Models can be overridden with `GEMINI_MODEL`, `GROQ_MODEL`, and `MISTRAL_MODEL`. Keep real keys in the untracked local `.env` file; `.env.example` contains placeholders only. Failover reduces outages but cannot help if all configured providers are unavailable or out of quota. `DATABASE_URL` is optional for local development; without it, graph records use `data/graphsheet.db`. For production graph storage, set it to a PostgreSQL URL such as `postgresql://user:password@host:5432/graphsheet`; the PostgreSQL driver is included in `requirements.txt`. Dataset graph building and retrieval do not require Neo4j configuration. Existing optional Neo4j settings are only relevant to legacy conversation-graph synchronization. `GEMINI_MODEL` defaults to `gemini-2.5-flash` and can be changed if your account supports another model. At least one configured LLM provider key is needed for RAG answers and Text-to-SQL; upload, preview, profiling, graph, and relationship APIs do not require an LLM key. Spreadsheet uploads accept `.csv`, legacy Excel `.xls`, and `.xlsx` files.
+Edit `.env` and set one or more provider API keys. The default order is Gemini, then Groq, then Mistral; providers without keys are skipped. Set `LLM_PROVIDER` to choose the primary provider and `LLM_FALLBACK_PROVIDERS` to change the fallback order. Models can be overridden with `GEMINI_MODEL`, `GROQ_MODEL`, and `MISTRAL_MODEL`. Keep real keys in the untracked local `.env` file; `.env.example` contains placeholders only. Failover reduces outages but cannot help if all configured providers are unavailable or out of quota. `DATABASE_URL` is optional for local development; without it, graph records use `data/graphsheet.db`. For production graph storage, set it to a PostgreSQL URL such as `postgresql://user:password@host:5432/graphsheet`; the PostgreSQL driver is included in `requirements.txt`. To use Neo4j for the dataset knowledge graph, set `NEO4J_URI`, `NEO4J_USERNAME`, and `NEO4J_PASSWORD` (and optionally `NEO4J_DATABASE`). Neo4j credentials are required together; Aura requires an encrypted `neo4j+s://` or `bolt+s://` URI. On the first graph build after configuration, existing datasets are rebuilt from their SQLite source records. ChromaDB stores local evidence vectors under `CHROMA_PERSIST_DIRECTORY` (default `data/chroma`). `GEMINI_MODEL` defaults to `gemini-2.5-flash` and can be changed if your account supports another model. At least one configured LLM provider key is needed for RAG answers and Text-to-SQL; upload, preview, profiling, graph, and relationship APIs do not require an LLM key. Spreadsheet uploads accept `.csv`, legacy Excel `.xls`, and `.xlsx` files.
 
 The `.venv` directory is ignored by Git. If it does not exist, create it with `py -m venv .venv` before installing dependencies. Dependency versions are listed in `requirements.txt`.
 
@@ -111,6 +120,13 @@ $body = @{ question = "What is the total revenue?" } | ConvertTo-Json
 Invoke-RestMethod -Method Post `
   -Uri "http://127.0.0.1:8001/conversations/$chatId/sql" `
   -ContentType "application/json" -Body $body
+
+$body = @{
+  question = "Show totals by category and separately by city and category"
+} | ConvertTo-Json
+Invoke-RestMethod -Method Post `
+  -Uri "http://127.0.0.1:8001/conversations/$chatId/sql-analysis" `
+  -ContentType "application/json" -Body $body
 ```
 
 Other endpoints include `GET /datasets/{dataset_id}/schema`, `GET /datasets/{dataset_id}/search`, `GET /graph/`, and `GET /relationships/`.
@@ -119,12 +135,17 @@ Conversation history and its persisted graph can be accessed with
 `GET /conversations/`, `GET /conversations/{conversation_id}`, and
 `GET /conversations/{conversation_id}/graph`. Chat RAG uses
 `POST /conversations/{conversation_id}/ask`; chat-scoped SQL uses
-`POST /conversations/{conversation_id}/sql`. Update the selected sheets with
+`POST /conversations/{conversation_id}/sql` for a single SQL result or
+`POST /conversations/{conversation_id}/sql-analysis` for multiple independently
+generated result tables in one turn. Update the selected sheets with
 `PATCH /conversations/{conversation_id}/datasets` and a
 `{"dataset_ids": ["<dataset-id>"]}` JSON body. Both endpoints use recent
 same-chat history and graph context; RAG uses evidence from selected sheets,
 and SQL execution rejects any table outside the selection. Candidate joins
-remain heuristic and are not asserted as verified foreign keys.
+remain heuristic and are not asserted as verified foreign keys. Inspect join
+options with `GET /conversations/{conversation_id}/sql-relationships` and
+approve a safe candidate using
+`POST /conversations/{conversation_id}/sql-relationships/{relationship_id}/approval`.
 
 Delete one uploaded dataset and its associated backend data:
 

@@ -33,6 +33,10 @@ class FakeSession:
 
     def run(self, query, **parameters):
         self.calls.append((query, parameters))
+        if "collect(DISTINCT build.scope_id)" in query:
+            return FakeResult(
+                [{"scope_ids": ["dataset-knowledge-graph:test-scope"]}]
+            )
         if "RETURN node.id AS id" in query:
             return FakeResult(
                 [
@@ -220,6 +224,164 @@ def test_sync_graph_writes_scoped_nodes_and_edge_provenance(monkeypatch):
     assert json.loads(node_write["nodes"][1]["properties_json"]) == {
         "dataset_id": "a" * 32
     }
+
+
+def test_replace_dataset_graph_keeps_nodes_and_edges_scoped_by_dataset(
+    monkeypatch,
+):
+    configure_neo4j(monkeypatch)
+    calls = []
+    monkeypatch.setattr(
+        neo4j_store.GraphDatabase,
+        "driver",
+        lambda *_args, **_kwargs: FakeDriver(calls),
+    )
+    dataset_id = "a" * 32
+    graph = {
+        "nodes": [
+            {
+                "id": f"dataset:{dataset_id}",
+                "type": "Dataset",
+                "label": "sales.csv",
+                "dataset_id": dataset_id,
+            },
+            {
+                "id": f"column:{dataset_id}:sales",
+                "type": "Column",
+                "label": "Sales",
+                "dataset_id": dataset_id,
+            },
+        ],
+        "edges": [
+            {
+                "id": f"contains:{dataset_id}:sales",
+                "source": f"dataset:{dataset_id}",
+                "target": f"column:{dataset_id}:sales",
+                "type": "HAS_COLUMN",
+            }
+        ],
+    }
+
+    neo4j_store.replace_dataset_graph(graph, [dataset_id])
+
+    edge_write = next(
+        parameters
+        for query, parameters in calls
+        if "UNWIND $edges AS row" in query
+    )
+    assert edge_write["edges"][0]["source_dataset_id"] == dataset_id
+    assert edge_write["edges"][0]["target_dataset_id"] == dataset_id
+    assert any(
+        "edge.source_dataset_id IN $dataset_ids" in query
+        for query, _ in calls
+    )
+    build_write = next(
+        parameters
+        for query, parameters in calls
+        if "UNWIND $builds AS row" in query
+    )
+    assert build_write["builds"][0]["dataset_id"] == dataset_id
+    assert build_write["builds"][0]["node_count"] == 2
+    assert build_write["builds"][0]["edge_count"] == 1
+
+
+def test_get_dataset_graph_reads_only_requested_dataset_ids(monkeypatch):
+    configure_neo4j(monkeypatch)
+    calls = []
+    monkeypatch.setattr(
+        neo4j_store.GraphDatabase,
+        "driver",
+        lambda *_args, **_kwargs: FakeDriver(calls),
+    )
+
+    graph = neo4j_store.get_dataset_graph(["a" * 32])
+
+    assert graph["nodes"][0]["dataset_id"] == "a" * 32
+    assert graph["edges"][0]["type"] == "HAS_COLUMN"
+    node_query = next(query for query, _ in calls if "RETURN node.id AS id" in query)
+    assert "node.scope_id = $scope_id" in node_query
+    assert any(
+        parameters.get("scope_id", "").startswith(
+            "dataset-knowledge-graph:"
+        )
+        for _, parameters in calls
+    )
+
+
+def test_dataset_graph_scopes_are_isolated_by_selected_dataset_set(monkeypatch):
+    configure_neo4j(monkeypatch)
+    calls = []
+    monkeypatch.setattr(
+        neo4j_store.GraphDatabase,
+        "driver",
+        lambda *_args, **_kwargs: FakeDriver(calls),
+    )
+    first_id = "a" * 32
+    second_id = "b" * 32
+    first_graph = {
+        "nodes": [
+            {
+                "id": f"dataset:{first_id}",
+                "type": "Dataset",
+                "label": "first.csv",
+                "dataset_id": first_id,
+            }
+        ],
+        "edges": [],
+    }
+    combined_graph = {
+        "nodes": [
+            *first_graph["nodes"],
+            {
+                "id": f"dataset:{second_id}",
+                "type": "Dataset",
+                "label": "second.csv",
+                "dataset_id": second_id,
+            },
+        ],
+        "edges": [],
+    }
+
+    neo4j_store.replace_dataset_graph(first_graph, [first_id])
+    neo4j_store.replace_dataset_graph(combined_graph, [first_id, second_id])
+
+    scopes = [
+        parameters["nodes"][0]["scope_id"]
+        for query, parameters in calls
+        if "UNWIND $nodes AS row" in query
+    ]
+    assert len(scopes) == 2
+    assert scopes[0] != scopes[1]
+
+
+def test_delete_dataset_graph_removes_only_the_selected_dataset(monkeypatch):
+    configure_neo4j(monkeypatch)
+    calls = []
+    monkeypatch.setattr(
+        neo4j_store.GraphDatabase,
+        "driver",
+        lambda *_args, **_kwargs: FakeDriver(calls),
+    )
+
+    neo4j_store.delete_dataset_graph("a" * 32)
+
+    edge_delete = next(
+        (query, parameters)
+        for query, parameters in calls
+        if "MATCH (edge:GraphEdge)" in query
+    )
+    assert edge_delete[1]["scope_ids"] == [
+        "dataset-knowledge-graph:test-scope"
+    ]
+    assert "DETACH DELETE edge" in edge_delete[0]
+    node_delete = next(
+        (query, parameters)
+        for query, parameters in calls
+        if "MATCH (node:GraphNode)" in query
+    )
+    assert node_delete[1]["scope_ids"] == [
+        "dataset-knowledge-graph:test-scope"
+    ]
 
 
 def test_driver_is_reused_and_connectivity_is_verified_once(monkeypatch):

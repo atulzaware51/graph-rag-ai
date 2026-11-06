@@ -1,0 +1,65 @@
+.highlighted-sql {
+  max-width: 100%;
+  margin: 0;
+  padding: 11px 12px;
+  overflow: auto;
+  border: 1px solid #bfdbfe;
+  border-radius: 0 0 8px 8px;
+  background: #eff6ff;
+  color: #1e293b;
+  font-family: "JetBrains Mono", Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.65;
+  white-space: pre;
+  overflow-wrap: normal;
+}
+
+.highlighted-sql .sql-token-keyword {
+  color: #1d4ed8;
+  font-weight: 700;
+}
+
+.highlighted-sql .sql-token-function {
+  color: #7e22ce;
+  font-weight: 600;
+}
+
+.highlighted-sql .sql-token-string {
+  color: #166534;
+}
+
+.highlighted-sql .sql-token-number {
+  color: #9a3412;
+}
+
+.highlighted-sql .sql-token-identifier {
+  color: #0e7490;
+}
+
+.highlighted-sql .sql-token-comment {
+  color: #526579;
+  font-style: italic;
+}
+
+.highlighted-sql .sql-token-operator {
+  color: #334155;
+  font-weight: 650;
+}
+
+.analyst-sql-code .highlighted-sql,
+.chat-sql-details > pre.highlighted-sql,
+.kg-details pre.highlighted-sql {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+  color: #1e293b;
+}
+
+.analyst-sql-code .highlighted-sql {
+  border-width: 0;
+  border-radius: 0 0 7px 7px;
+}
+
+.chat-sql-details > .highlighted-sql,
+.kg-details .highlighted-sql {
+  border-radius: 7px;
+}

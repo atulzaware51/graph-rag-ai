@@ -1,0 +1,196 @@
+/* Present SQL analysis plans, safe query status, results, and join approvals. */
+.analyst-sql-analysis {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.analyst-sql-sources {
+  margin: 0;
+  color: #68778c;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.analyst-sql-query,
+.analyst-sql-relationships {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #e4e9f1;
+  border-radius: 9px;
+  background: #fff;
+}
+
+.analyst-sql-query > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.analyst-sql-query h3,
+.analyst-sql-relationships h3 {
+  margin: 3px 0 0;
+  color: #34435a;
+  font-size: 13px;
+}
+
+.analyst-sql-query header p,
+.analyst-sql-relationships > p {
+  margin: 5px 0 0;
+  color: #68778c;
+  font-size: 11px;
+}
+
+.analyst-sql-query-number {
+  color: #79879a;
+  font-size: 10px;
+  font-weight: 650;
+  text-transform: uppercase;
+}
+
+.analyst-sql-status {
+  flex: 0 0 auto;
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: #f0f3f7;
+  color: #596a81;
+  font-size: 10px;
+  text-transform: capitalize;
+}
+
+.analyst-sql-status.success {
+  background: #e7f6ed;
+  color: #287347;
+}
+
+.analyst-sql-status.failed,
+.analyst-sql-status.needs_clarification {
+  background: #fff1e8;
+  color: #9c5425;
+}
+
+/* Make generated SQL inspectable without overwhelming the result view. */
+.analyst-sql-code {
+  margin-top: 10px;
+  border: 1px solid #e7ebf2;
+  border-radius: 7px;
+}
+
+.analyst-sql-code summary {
+  padding: 8px 10px;
+  color: #425570;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.analyst-sql-code pre {
+  max-width: 100%;
+  margin: 0;
+  padding: 10px;
+  overflow: auto;
+  background: #f8f9fb;
+  color: #34435a;
+  font-size: 11px;
+}
+
+.analyst-sql-copy-row {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 8px 6px;
+}
+
+.analyst-sql-copy-row button,
+.analyst-sql-relationship button {
+  padding: 5px 8px;
+  border: 1px solid #dce4ef;
+  border-radius: 6px;
+  background: #fff;
+  color: #385987;
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.analyst-sql-row-count,
+.analyst-sql-empty {
+  margin: 9px 0 6px;
+  color: #68778c;
+  font-size: 10px;
+}
+
+/* Keep query result tables bounded and scrollable when they have many columns. */
+.analyst-sql-table-wrap {
+  max-width: 100%;
+  max-height: 360px;
+  overflow: auto;
+  border: 1px solid #e5eaf1;
+  border-radius: 7px;
+}
+
+.analyst-sql-table-wrap table {
+  width: 100%;
+  border-collapse: collapse;
+  color: #34435a;
+  font-size: 11px;
+}
+
+.analyst-sql-table-wrap th,
+.analyst-sql-table-wrap td {
+  padding: 7px 9px;
+  border-bottom: 1px solid #edf0f5;
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.analyst-sql-table-wrap th {
+  position: sticky;
+  top: 0;
+  background: #f7f9fc;
+  color: #53637a;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.analyst-sql-clarification,
+.analyst-sql-error,
+.analyst-sql-code-note {
+  margin: 0;
+  color: #9b4c28;
+  font-size: 11px;
+}
+
+.analyst-sql-code-note {
+  color: #385987;
+}
+
+/* Distinguish relationship candidates that need the user's explicit approval. */
+.analyst-sql-relationships {
+  display: grid;
+  gap: 8px;
+}
+
+.analyst-sql-relationship {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 8px;
+  border-top: 1px solid #edf0f5;
+  color: #34435a;
+  font-size: 11px;
+}
+
+.analyst-sql-relationship small {
+  display: block;
+  margin-top: 3px;
+  color: #78869a;
+  font-size: 10px;
+}
+
+.analyst-sql-relationship strong {
+  color: #287347;
+  font-size: 10px;
+}

@@ -54,7 +54,7 @@ def test_database(tmp_path, monkeypatch):
     monkeypatch.setattr(
         service,
         "get_dataset_details",
-        lambda dataset_id: {
+        lambda dataset_id, database_path=database: {
             "dataset_id": dataset_id,
             "table_name": table_name,
         },
@@ -181,7 +181,7 @@ def test_ask_with_sql_uses_selected_tables_and_graph_context(
     monkeypatch.setattr(
         service,
         "get_dataset_details",
-        lambda dataset_id: {
+        lambda dataset_id, database_path=test_database: {
             "dataset_id": dataset_id,
             "table_name": (
                 first_table if dataset_id == first_id else second_table

@@ -6,7 +6,10 @@ import logging
 import os
 import random
 import time
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from pathlib import Path
+from typing import Any
 
 import httpx
 from dotenv import load_dotenv
@@ -18,13 +21,36 @@ logger = logging.getLogger(__name__)
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 load_dotenv(PROJECT_ROOT / ".env")
 REQUEST_TIMEOUT_SECONDS = 30.0
-MAX_ATTEMPTS_PER_PROVIDER = 3
-RETRY_BASE_SECONDS = 0.5
-RETRY_MAX_SECONDS = 4.0
+MAX_ATTEMPTS_PER_PROVIDER = 2
+RETRY_BASE_SECONDS = 0.25
+RETRY_MAX_SECONDS = 1.0
+MAX_RETRY_AFTER_SECONDS = 2.0
 OPENAI_COMPATIBLE_ENDPOINTS = {
     "groq": "https://api.groq.com/openai/v1/chat/completions",
     "mistral": "https://api.mistral.ai/v1/chat/completions",
 }
+PROVIDER_SETTINGS = {
+    "gemini": ("GEMINI_API_KEY", "GEMINI_MODEL", "gemini-2.5-flash"),
+    "groq": ("GROQ_API_KEY", "GROQ_MODEL", "llama-3.3-70b-versatile"),
+    "mistral": ("MISTRAL_API_KEY", "MISTRAL_MODEL", "mistral-small-latest"),
+}
+
+
+def _environment_value(name: str, default: str = "") -> str:
+    """Read a provider setting and remove optional quotes from local env files."""
+    value = os.getenv(name, default).strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        value = value[1:-1].strip()
+    return value
+
+
+def provider_model_name(provider: str) -> str | None:
+    """Return a provider's configured model without exposing credentials."""
+    setting = PROVIDER_SETTINGS.get(provider)
+    if setting is None:
+        return None
+    _, model_name, default_model = setting
+    return _environment_value(model_name, default_model) or None
 
 
 class LLMProviderError(RuntimeError):
@@ -38,6 +64,7 @@ class LLMProviderError(RuntimeError):
         retryable: bool,
         provider: str | None = None,
     ) -> None:
+        """Expose safe error details so callers can decide whether to retry."""
         super().__init__(message)
         self.code = code
         self.retryable = retryable
@@ -45,15 +72,136 @@ class LLMProviderError(RuntimeError):
 
 
 class _ProviderCallError(RuntimeError):
-    def __init__(self, code: str, retryable: bool) -> None:
+    """Represent one provider failure with retry details for the failover loop."""
+
+    def __init__(
+        self,
+        code: str,
+        retryable: bool,
+        retry_after_seconds: float | None = None,
+    ) -> None:
+        """Keep provider-specific retry hints for the provider failover loop."""
         super().__init__(code)
         self.code = code
         self.retryable = retryable
+        self.retry_after_seconds = retry_after_seconds
+
+
+def provider_diagnostics() -> list[dict[str, str | bool | None]]:
+    """Describe configured provider names/models without returning credentials."""
+    diagnostics = []
+    for provider in _configured_order():
+        try:
+            config = _provider_config(provider)
+        except _ProviderCallError as exc:
+            diagnostics.append(
+                {
+                    "provider": provider,
+                    "model": provider_model_name(provider),
+                    "configured": False,
+                    "status": exc.code.casefold(),
+                }
+            )
+            continue
+        diagnostics.append(
+            {
+                "provider": provider,
+                "model": provider_model_name(provider),
+                "configured": config is not None,
+                "status": "configured" if config else "missing_api_key",
+            }
+        )
+    return diagnostics
+
+
+def _retry_after_seconds(value: str | None) -> float | None:
+    """Convert either numeric or HTTP-date retry guidance into seconds."""
+    if not value:
+        return None
+    try:
+        return max(0.0, float(value))
+    except ValueError:
+        try:
+            retry_at = parsedate_to_datetime(value)
+            if retry_at.tzinfo is None:
+                retry_at = retry_at.replace(tzinfo=timezone.utc)
+            return max(
+                0.0,
+                (retry_at - datetime.now(timezone.utc)).total_seconds(),
+            )
+        except (TypeError, ValueError, OverflowError):
+            return None
+
+
+def _exception_retry_after_seconds(exc: Exception) -> float | None:
+    """Extract retry timing from an SDK exception's HTTP response when present."""
+    response = getattr(exc, "response", None)
+    headers = getattr(response, "headers", None)
+    value = headers.get("Retry-After") if hasattr(headers, "get") else None
+    return _retry_after_seconds(value if isinstance(value, str) else None)
+
+
+def _response_error_details(response: httpx.Response) -> tuple[str, str]:
+    """Read normalized error code and message fields from provider JSON."""
+    try:
+        payload = response.json()
+    except ValueError:
+        return "", ""
+    if not isinstance(payload, dict):
+        return "", ""
+    error: Any = payload.get("error", {})
+    if isinstance(error, str):
+        return "", error.casefold()
+    if not isinstance(error, dict):
+        return "", ""
+    code = error.get("code") or error.get("type") or ""
+    message = error.get("message") or ""
+    return (
+        code.casefold() if isinstance(code, str) else "",
+        message.casefold() if isinstance(message, str) else "",
+    )
+
+
+def _is_quota_failure(code: str, message: str) -> bool:
+    """Distinguish exhausted account quota from a temporary request rate limit."""
+    return any(
+        marker in code or marker in message
+        for marker in ("quota", "resource_exhausted", "billing")
+    )
+
+
+def _classify_http_response(response: httpx.Response) -> _ProviderCallError:
+    """Map HTTP responses to consistent authentication, retry, or model errors."""
+    code_detail, message = _response_error_details(response)
+    if response.status_code in {401, 403}:
+        return _ProviderCallError("AUTHENTICATION_FAILED", retryable=False)
+    if response.status_code == 404:
+        return _ProviderCallError("MODEL_UNAVAILABLE", retryable=False)
+    if response.status_code == 429:
+        if _is_quota_failure(code_detail, message):
+            return _ProviderCallError("QUOTA_EXHAUSTED", retryable=False)
+        return _ProviderCallError(
+            "RATE_LIMITED",
+            retryable=True,
+            retry_after_seconds=_retry_after_seconds(
+                response.headers.get("Retry-After")
+            ),
+        )
+    if response.status_code >= 500:
+        return _ProviderCallError(
+            "PROVIDER_UNAVAILABLE",
+            retryable=True,
+            retry_after_seconds=_retry_after_seconds(
+                response.headers.get("Retry-After")
+            ),
+        )
+    return _ProviderCallError("PROVIDER_REQUEST_REJECTED", retryable=False)
 
 
 def _configured_order() -> list[str]:
-    primary = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
-    fallback = os.getenv(
+    """Build and validate the primary-provider-first failover order."""
+    primary = _environment_value("LLM_PROVIDER", "gemini").lower()
+    fallback = _environment_value(
         "LLM_FALLBACK_PROVIDERS",
         "groq,mistral",
     )
@@ -68,15 +216,12 @@ def _configured_order() -> list[str]:
 
 
 def _provider_config(provider: str) -> tuple[str, str] | None:
-    if provider == "gemini":
-        api_key = os.getenv("GEMINI_API_KEY", "").strip()
-        model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip()
-    elif provider == "groq":
-        api_key = os.getenv("GROQ_API_KEY", "").strip()
-        model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile").strip()
-    else:
-        api_key = os.getenv("MISTRAL_API_KEY", "").strip()
-        model = os.getenv("MISTRAL_MODEL", "mistral-small-latest").strip()
+    """Return usable credentials and model settings, or None if unconfigured."""
+    key_name, model_name, default_model = PROVIDER_SETTINGS[provider]
+    api_key = _environment_value(key_name)
+    model = _environment_value(model_name, default_model)
+    if api_key.casefold().startswith(("your_", "your-", "replace_", "replace-", "placeholder")):
+        return None
     if not api_key:
         return None
     if not model:
@@ -91,6 +236,7 @@ def _call_provider(
     system_prompt: str,
     user_prompt: str,
 ) -> str:
+    """Send prompts through the provider's native or OpenAI-compatible API."""
     if provider == "gemini":
         client = genai.Client(
             api_key=api_key,
@@ -124,31 +270,22 @@ def _call_provider(
             },
             timeout=REQUEST_TIMEOUT_SECONDS,
         )
-        status_code = response.status_code
-        if status_code >= 400:
-            if status_code in {401, 403}:
-                code = "AUTHENTICATION_FAILED"
-                retryable = False
-            elif status_code == 404:
-                code = "MODEL_UNAVAILABLE"
-                retryable = False
-            elif status_code == 429:
-                code = "RATE_LIMITED"
-                retryable = True
-            elif status_code >= 500:
-                code = "PROVIDER_UNAVAILABLE"
-                retryable = True
-            else:
-                code = "PROVIDER_REQUEST_REJECTED"
-                retryable = False
+        if response.status_code >= 400:
+            raise _classify_http_response(response)
+        try:
+            payload = response.json()
+        except ValueError as exc:
             raise _ProviderCallError(
-                code,
-                retryable=retryable,
-            )
-        payload = response.json()
+                "INVALID_RESPONSE",
+                retryable=False,
+            ) from exc
+        if not isinstance(payload, dict):
+            raise _ProviderCallError("INVALID_RESPONSE", retryable=False)
         choices = payload.get("choices")
         if not isinstance(choices, list) or not choices:
             raise _ProviderCallError("EMPTY_RESPONSE", retryable=True)
+        if not isinstance(choices[0], dict):
+            raise _ProviderCallError("INVALID_RESPONSE", retryable=False)
         message = choices[0].get("message", {})
         text = message.get("content", "") if isinstance(message, dict) else ""
         if isinstance(text, list):
@@ -165,6 +302,7 @@ def _call_provider(
 
 
 def _classify_provider_error(exc: Exception) -> _ProviderCallError:
+    """Translate SDK exceptions into the same categories used for HTTP errors."""
     if isinstance(exc, _ProviderCallError):
         return exc
     if isinstance(exc, (httpx.TimeoutException, httpx.TransportError)):
@@ -174,7 +312,13 @@ def _classify_provider_error(exc: Exception) -> _ProviderCallError:
         provider_status = str(getattr(exc, "status", "")).upper()
         provider_message = str(getattr(exc, "message", "")).casefold()
         if status_code == 429:
-            return _ProviderCallError("RATE_LIMITED", retryable=True)
+            if _is_quota_failure(provider_status, provider_message):
+                return _ProviderCallError("QUOTA_EXHAUSTED", retryable=False)
+            return _ProviderCallError(
+                "RATE_LIMITED",
+                retryable=True,
+                retry_after_seconds=_exception_retry_after_seconds(exc),
+            )
         if status_code in {500, 502, 503, 504}:
             return _ProviderCallError("PROVIDER_UNAVAILABLE", retryable=True)
         if status_code == 404:
@@ -195,7 +339,13 @@ def _classify_provider_error(exc: Exception) -> _ProviderCallError:
     if isinstance(exc, httpx.HTTPStatusError):
         status_code = exc.response.status_code
         if status_code == 429:
-            return _ProviderCallError("RATE_LIMITED", retryable=True)
+            return _ProviderCallError(
+                "RATE_LIMITED",
+                retryable=True,
+                retry_after_seconds=_retry_after_seconds(
+                    exc.response.headers.get("Retry-After")
+                ),
+            )
         if status_code in {401, 403}:
             return _ProviderCallError("AUTHENTICATION_FAILED", retryable=False)
         if status_code == 404:
@@ -204,6 +354,11 @@ def _classify_provider_error(exc: Exception) -> _ProviderCallError:
             "PROVIDER_UNAVAILABLE" if status_code >= 500 else
             "PROVIDER_REQUEST_REJECTED",
             retryable=status_code >= 500,
+            retry_after_seconds=(
+                _retry_after_seconds(exc.response.headers.get("Retry-After"))
+                if status_code >= 500
+                else None
+            ),
         )
     return _ProviderCallError("PROVIDER_REQUEST_FAILED", retryable=False)
 
@@ -226,42 +381,74 @@ def generate_text(
             last_error = exc
             attempted.append(provider)
             provider_failures[provider] = exc.code
+            logger.warning(
+                "LLM provider %s configuration failed (category=%s).",
+                provider,
+                exc.code,
+            )
             continue
         if config is None:
+            logger.info(
+                "LLM provider %s skipped (model=%s, API key=missing).",
+                provider,
+                provider_model_name(provider),
+            )
             continue
         api_key, model = config
         attempted.append(provider)
+        logger.info(
+            "LLM provider %s configured (model=%s, API key=present).",
+            provider,
+            model,
+        )
 
         for attempt in range(MAX_ATTEMPTS_PER_PROVIDER):
+            started_at = time.monotonic()
             try:
-                return (
-                    _call_provider(
-                        provider,
-                        api_key,
-                        model,
-                        system_prompt,
-                        user_prompt,
-                    ),
+                text = _call_provider(
                     provider,
+                    api_key,
+                    model,
+                    system_prompt,
+                    user_prompt,
                 )
+                logger.info(
+                    "LLM provider %s request succeeded "
+                    "(model=%s, attempt=%s, duration_ms=%s).",
+                    provider,
+                    model,
+                    attempt + 1,
+                    round((time.monotonic() - started_at) * 1000),
+                )
+                return text, provider
             except Exception as exc:
                 failure = _classify_provider_error(exc)
                 last_error = failure
                 provider_failures[provider] = failure.code
                 logger.warning(
-                    "LLM provider %s failed (model=%s, code=%s, attempt=%s).",
+                    "LLM provider %s failed "
+                    "(model=%s, category=%s, attempt=%s, duration_ms=%s).",
                     provider,
                     model,
                     failure.code,
                     attempt + 1,
+                    round((time.monotonic() - started_at) * 1000),
                 )
                 if not failure.retryable or attempt == MAX_ATTEMPTS_PER_PROVIDER - 1:
                     break
-                delay = min(
-                    RETRY_BASE_SECONDS * (2**attempt),
-                    RETRY_MAX_SECONDS,
-                )
-                time.sleep(random.uniform(delay * 0.75, delay * 1.25))
+                if failure.retry_after_seconds is not None:
+                    delay = min(
+                        failure.retry_after_seconds,
+                        MAX_RETRY_AFTER_SECONDS,
+                    )
+                else:
+                    delay = min(
+                        RETRY_BASE_SECONDS * (2**attempt),
+                        RETRY_MAX_SECONDS,
+                    )
+                    delay = random.uniform(delay * 0.75, delay * 1.25)
+                if delay > 0:
+                    time.sleep(delay)
 
     if not attempted:
         raise LLMProviderError(

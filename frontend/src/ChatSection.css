@@ -1,4 +1,5 @@
 
+/* Style the standalone chat panel, keeping messages and the composer in one view. */
 .chat-section {
   display: flex;
   flex-direction: column;
@@ -13,6 +14,7 @@
   color: #1e293b;
 }
 
+/* Header identifies the active dataset while the conversation is open. */
 .chat-header {
   display: flex;
   align-items: center;
@@ -46,6 +48,7 @@
   font-size: 12px;
 }
 
+/* Keep the conversation scrollable without moving the input composer. */
 .chat-messages {
   flex: 1;
   min-height: 0;
@@ -214,6 +217,7 @@
   font-weight: 600;
 }
 
+/* Pin the question composer to the bottom of the chat panel. */
 .chat-composer {
   margin: 0 20px 20px;
   padding: 12px 14px;
@@ -279,6 +283,7 @@
   cursor: not-allowed;
 }
 
+/* Reduce spacing and width constraints on narrow screens. */
 @media (max-width: 640px) {
   .chat-section {
     height: calc(100dvh - 100px);

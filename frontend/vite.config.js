@@ -1,4 +1,5 @@
 
+// Configure the React dev server and proxy API requests to the local FastAPI backend.
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 

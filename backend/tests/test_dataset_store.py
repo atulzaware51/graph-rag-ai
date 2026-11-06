@@ -74,7 +74,9 @@ def test_content_fingerprint_matches_repeated_uploads(tmp_path):
     first_upload = store_spreadsheet(first, "customers.csv", database)
     second_upload = store_spreadsheet(second, "customers.csv", database)
 
-    assert first_upload["dataset_id"] != second_upload["dataset_id"]
+    assert first_upload["dataset_id"] == second_upload["dataset_id"]
+    assert first_upload["duplicate"] is False
+    assert second_upload["duplicate"] is True
     assert (
         first_upload["content_fingerprint"]
         == second_upload["content_fingerprint"]
@@ -104,6 +106,37 @@ def test_content_fingerprint_matches_same_sheet_across_file_formats(tmp_path):
         csv_upload["content_fingerprint"]
         == xlsx_upload["content_fingerprint"]
     )
+    assert csv_upload["dataset_id"] == xlsx_upload["dataset_id"]
+    assert xlsx_upload["duplicate"] is True
+
+
+def test_store_named_worksheet_metadata(tmp_path):
+    workbook = Workbook()
+    workbook.active.title = "Products"
+    workbook.active.append(["product", "price"])
+    workbook.active.append(["Laptop", 1200])
+    worksheet = workbook.create_sheet("Departments")
+    worksheet.append(["department", "employees"])
+    worksheet.append(["Sales", 4])
+    xlsx_path = tmp_path / "workbook.xlsx"
+    workbook.save(xlsx_path)
+
+    products = store_spreadsheet(
+        xlsx_path,
+        "workbook.xlsx",
+        tmp_path / "test.db",
+        sheet_name="Products",
+    )
+    departments = store_spreadsheet(
+        xlsx_path,
+        "workbook.xlsx",
+        tmp_path / "test.db",
+        sheet_name="Departments",
+    )
+
+    assert products["sheet_name"] == "Products"
+    assert departments["sheet_name"] == "Departments"
+    assert products["dataset_id"] != departments["dataset_id"]
 
 
 def test_store_legacy_xls_and_metadata(tmp_path):
@@ -145,6 +178,60 @@ def test_content_fingerprint_changes_when_cell_values_change(tmp_path):
         first_upload["content_fingerprint"]
         != second_upload["content_fingerprint"]
     )
+    assert first_upload["dataset_id"] != second_upload["dataset_id"]
+    assert second_upload["duplicate"] is False
+
+
+def test_duplicate_upload_reuses_existing_chunks(tmp_path):
+    source = tmp_path / "customers.csv"
+    source.write_text("Name\nAlice\n", encoding="utf-8")
+    chunks = [
+        {
+            "chunk_id": "customer-alice",
+            "text": "Name: Alice",
+            "metadata": {"source_rows": [2]},
+        }
+    ]
+    database = tmp_path / "reuse.db"
+    first = store_spreadsheet(
+        source,
+        "customers.csv",
+        database,
+        chunks=chunks,
+    )
+    second = store_spreadsheet(
+        source,
+        "renamed-customers.csv",
+        database,
+        chunks=chunks,
+    )
+
+    assert second["duplicate"] is True
+    assert second["dataset_id"] == first["dataset_id"]
+    assert len(get_dataset_chunks(first["dataset_id"], database)) == 1
+
+
+def test_duplicate_upload_backfills_legacy_dataset_fingerprint(tmp_path):
+    source = tmp_path / "legacy.csv"
+    source.write_text("Name\nAlice\n", encoding="utf-8")
+    database = tmp_path / "legacy.db"
+    first = store_spreadsheet(source, "legacy.csv", database)
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "UPDATE datasets SET content_fingerprint = NULL WHERE dataset_id = ?",
+            (first["dataset_id"],),
+        )
+
+    reused = store_spreadsheet(source, "legacy.csv", database)
+
+    assert reused["duplicate"] is True
+    assert reused["dataset_id"] == first["dataset_id"]
+    with sqlite3.connect(database) as connection:
+        fingerprint = connection.execute(
+            "SELECT content_fingerprint FROM datasets WHERE dataset_id = ?",
+            (first["dataset_id"],),
+        ).fetchone()[0]
+    assert fingerprint == first["content_fingerprint"]
 
 
 def test_store_rejects_unsupported_extension(tmp_path):

@@ -1,9 +1,12 @@
+// Coordinate the main workspace: dataset upload, persistent chats, and analyst views.
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import KnowledgeGraph from './components/KnowledgeGraph'
 import OverviewGraphs from './components/OverviewGraphs'
 import ChatContextPanel from './components/ChatContextPanel'
-import SQLResultChart from './components/SQLResultChart'
+import HighlightedSQL from './components/HighlightedSQL'
+import StructuredAnswer from './components/StructuredAnswer'
+import SQLAnalysisResults from './components/SQLAnalysisResults'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './components/ChatWorkspace.css'
 
@@ -17,7 +20,8 @@ import {
   addConversationEvent,
   updateConversationDatasets,
   askConversation,
-  askConversationSQL,
+  analyzeConversationSQL,
+  approveConversationSQLRelationship,
   checkHealth,
   uploadDataset,
   deleteDataset,
@@ -32,16 +36,16 @@ const navigation = [
       { id: 'overview', icon: '◫', label: 'Overview' },
       { id: 'datasets', icon: '▤', label: 'Datasets' },
       { id: 'analyst', icon: '✳', label: 'AI Analyst' },
-      { id: 'sql', icon: '⌘', label: 'SQL Studio' },
       { id: 'knowledge', icon: '◎', label: 'Knowledge Graph' },
     ],
   },
-  {
-    section: 'PREFERENCES',
-    items: [{ id: 'settings', icon: '⚙', label: 'Settings' }],
-  },
+  // {
+  //   section: 'PREFERENCES',
+  //   items: [{ id: 'settings', icon: '⚙', label: 'Settings' }],
+  // },
 ]
 
+// Describe the feature cards shown when users first enter the workspace.
 const features = [
   {
     icon: '▤',
@@ -57,9 +61,9 @@ const features = [
   },
   {
     icon: '⌘',
-    title: 'Generate SQL',
-    text: 'Turn natural-language questions into SQL queries.',
-    target: 'sql',
+    title: 'Analyze with SQL',
+    text: 'Generate multiple safe SQL result tables from a natural-language request.',
+    target: 'analyst',
   },
   {
     icon: '◎',
@@ -75,6 +79,7 @@ const CHAT_STORAGE_KEY = 'graphsheet-ai-chat-sessions'
 const EMPTY_SOURCES = []
 
 function createChatSession() {
+  // Give client-side chat state a complete shape before server persistence begins.
   const now = new Date().toISOString()
 
   return {
@@ -91,6 +96,7 @@ function createChatSession() {
 }
 
 function loadChatSessions() {
+  // Restore older browser-cached chats so they can be migrated into the API store.
   try {
     const saved = localStorage.getItem(CHAT_STORAGE_KEY)
 
@@ -111,6 +117,7 @@ function loadChatSessions() {
 }
 
 function conversationToChat(conversation) {
+  // Convert API events back to the UI model, joining stored result references to SQL events.
   const events = conversation.events || []
   const selectedDatasetIds = conversation.selected_dataset_ids || (
     conversation.dataset_id ? [conversation.dataset_id] : []
@@ -152,10 +159,54 @@ function conversationToChat(conversation) {
           id: event.event_id,
           role: event.actor,
           content: event.message || '',
+          intent: event.metadata?.intent,
           question: event.metadata?.question || '',
           requestId: event.metadata?.request_id,
           sources: event.metadata?.sources || [],
+          structuredAnswer: event.metadata?.response?.structured_answer || null,
+          sql: event.metadata?.response?.sql || null,
+          sqlResult: event.metadata?.response?.sql_result || null,
+          sqlSources: event.metadata?.response?.sql_sources || [],
+          sqlAnalysis:
+            event.metadata?.sql_analysis
+            || event.metadata?.response?.sql_analysis
+            || null,
+          sqlMode: event.metadata?.mode || 'analysis',
+          graphWarning: event.metadata?.response?.graph_warning,
           status: event.metadata?.status || 'success',
+          createdAt: event.created_at,
+        }]
+      }
+
+      if (
+        event.event_type === 'sql_studio_prompt'
+        && event.metadata?.surface === 'sql_studio'
+      ) {
+        return [{
+          id: event.event_id,
+          role: 'user',
+          intent: 'sql_analysis',
+          content: event.message || '',
+          question: event.message || '',
+          createdAt: event.created_at,
+        }]
+      }
+
+      if (
+        event.event_type === 'sql_studio_analysis'
+        && event.metadata?.surface === 'sql_studio'
+        && event.metadata?.analysis
+      ) {
+        const analysis = event.metadata.analysis
+        return [{
+          id: event.event_id,
+          role: 'assistant',
+          intent: 'sql_analysis',
+          content: analysis.clarification
+            || `${analysis.analysis_title || 'SQL analysis'}: ${analysis.queries?.length || 0} result tables generated.`,
+          question: analysis.original_prompt || '',
+          sqlAnalysis: analysis,
+          status: analysis.status || 'success',
           createdAt: event.created_at,
         }]
       }
@@ -194,10 +245,12 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024
 const ACCEPTED_EXTENSIONS = ['.csv', '.xls', '.xlsx']
 
 function formatNumber(value) {
+  // Use locale-aware formatting for row counts and other displayed totals.
   return (Number(value) || 0).toLocaleString()
 }
 
 function getDatasetsForChat(chat, datasets) {
+  // Resolve a chat's selected IDs to the current dataset records.
   const datasetIds = chat?.selectedDatasetIds || (
     chat?.datasetId ? [chat.datasetId] : []
   )
@@ -209,24 +262,56 @@ function getDatasetsForChat(chat, datasets) {
 }
 
 function getFileExtension(filename) {
+  // Normalize the suffix so upload validation is case-insensitive.
   return filename.slice(filename.lastIndexOf('.')).toLowerCase()
 }
 
+function getSpreadsheetIcon(filename = '') {
+  // Choose a compact icon by spreadsheet format for dataset lists.
+  const extension = getFileExtension(filename)
+
+  if (extension === '.xlsx' || extension === '.xls') {
+    return '▦'
+  }
+
+  if (extension === '.csv') {
+    return '▤'
+  }
+
+  return '▧'
+}
+
+function truncateTableName(name = '', maxLength = 24) {
+  // Keep long generated table names readable without losing their identifying ends.
+  if (name.length <= maxLength) return name
+
+  const startLength = Math.floor((maxLength - 3) / 2)
+  const endLength = maxLength - 3 - startLength
+
+  return `${name.slice(0, startLength)}...${name.slice(-endLength)}`
+}
+
 function App() {
+  // Own application-wide UI state and connect views to the backend services.
  const [chatSessions, setChatSessions] = useState(loadChatSessions)
 
 const [activeChatId, setActiveChatId] = useState(
   () => loadChatSessions()[0]?.id
 )
-
+const [contextPanelOpen, setContextPanelOpen] = useState(true)
+const [copiedTableName, setCopiedTableName] = useState('')
+const [datasetToDelete, setDatasetToDelete] = useState(null)
+const [datasetDeleteLoading, setDatasetDeleteLoading] = useState(false)
 const [chatInput, setChatInput] = useState('')
 const [chatLoading, setChatLoading] = useState(false)
 const [chatError, setChatError] = useState('')
 const [chatRetry, setChatRetry] = useState(null)
-const [sqlInput, setSqlInput] = useState('')
+const activeChatRequestRef = useRef(null)
 const [sqlLoading, setSqlLoading] = useState(false)
-const [sqlError, setSqlError] = useState('')
-const [sqlResult, setSqlResult] = useState(null)
+const [sqlLoadingMode, setSqlLoadingMode] = useState('analysis')
+const [datasetSearch, setDatasetSearch] = useState('')
+const [datasetPickerOpen, setDatasetPickerOpen] = useState(false)
+const [sourceToolsOpen, setSourceToolsOpen] = useState(false)
 const [contextTab, setContextTab] = useState('evidence')
   const [activePage, setActivePage] = useState('analyst')
   const [question, setQuestion] = useState('')
@@ -244,8 +329,11 @@ const [contextTab, setContextTab] = useState('evidence')
   const [deletingDatasetId, setDeletingDatasetId] = useState('')
   const [datasetDeleteError, setDatasetDeleteError] = useState('')
   const fileInputRef = useRef(null)
+  const chatMessagesRef = useRef(null)
+  const shouldAutoScrollRef = useRef(true)
 
   const loadDatasets = useCallback(async (showLoading = true) => {
+    // Keep initial loading and user-triggered refresh indicators distinct.
     if (showLoading) {
       setLoading(true)
     } else {
@@ -273,6 +361,7 @@ const [contextTab, setContextTab] = useState('evidence')
     let cancelled = false
 
     async function initializeDashboard() {
+      // Check API readiness first, then fetch datasets only while this view is mounted.
       try {
         const health = await checkHealth()
 
@@ -301,6 +390,7 @@ const [contextTab, setContextTab] = useState('evidence')
     let cancelled = false
 
     async function loadPersistentChats() {
+      // Restore server conversations and migrate any legacy browser-only sessions.
       try {
         const legacyChats = loadChatSessions()
         let conversations = await getConversations()
@@ -416,7 +506,6 @@ const [contextTab, setContextTab] = useState('evidence')
     overview: 'Overview',
     datasets: 'Datasets',
     analyst: 'AI Analyst',
-    sql: 'SQL Studio',
     knowledge: 'Knowledge Graph',
     settings: 'Settings',
   }
@@ -440,10 +529,31 @@ useEffect(() => {
 const activeChat =
   chatSessions.find((chat) => chat.id === activeChatId) ??
   chatSessions[0]
+useEffect(() => {
+  if (!shouldAutoScrollRef.current || !chatMessagesRef.current) return
+  chatMessagesRef.current.scrollTop = chatMessagesRef.current.scrollHeight
+}, [
+  activeChat?.id,
+  activeChat?.messages?.length,
+  chatLoading,
+  sqlLoading,
+])
 const activeChatDatasets = useMemo(
   () => getDatasetsForChat(activeChat, datasets),
   [activeChat, datasets],
 )
+const filteredDatasets = useMemo(() => {
+  const search = datasetSearch.trim().toLowerCase()
+  if (!search) return datasets
+  return datasets.filter((dataset) => [
+    dataset.original_filename,
+    dataset.sheet_name,
+    dataset.sheet,
+    dataset.table_name,
+  ].some((value) => (
+    typeof value === 'string' && value.toLowerCase().includes(search)
+  )))
+}, [datasetSearch, datasets])
 const latestAnswerMessage = [...(activeChat?.messages || [])]
   .reverse()
   .find((message) => message.role === 'assistant' && Array.isArray(message.sources))
@@ -467,10 +577,21 @@ function updateChat(chatId, updater) {
 
 // Start a fresh conversation.
 async function createNewChat() {
+  // Persist the new conversation and carry forward only still-existing selected sheets.
   let newChat
   try {
     const persistedChat = await createConversation()
     newChat = conversationToChat(persistedChat)
+    const selectedDatasetIds = (activeChat?.selectedDatasetIds || []).filter(
+      (datasetId) => datasets.some((dataset) => dataset.dataset_id === datasetId),
+    )
+    if (selectedDatasetIds.length) {
+      const selection = await updateConversationDatasets(
+        newChat.id,
+        selectedDatasetIds,
+      )
+      newChat = conversationToChat(selection.conversation)
+    }
   } catch (err) {
     setChatError(err.message || 'Unable to create a persistent chat.')
     return
@@ -481,16 +602,15 @@ async function createNewChat() {
     ...current,
   ])
 
+  shouldAutoScrollRef.current = true
   setActiveChatId(newChat.id)
   setChatInput('')
   setChatError('')
-  setSqlInput('')
-  setSqlError('')
-  setSqlResult(null)
   setActivePage('analyst')
 }
 
 async function deleteChatSession(chatId) {
+  // Require confirmation, delete on the server, then update local chat selection.
   const chat = chatSessions.find((item) => item.id === chatId)
   if (!chat || !window.confirm(`Delete "${chat.title || 'New chat'}" and its chat history?`)) {
     return
@@ -524,13 +644,11 @@ async function deleteChatSession(chatId) {
     }
     setChatInput('')
     setChatError('')
-    setSqlInput('')
-    setSqlError('')
-    setSqlResult(null)
   }
 }
 
 async function deleteDatasetAndRelatedData(dataset) {
+  // Remove the dataset through the API and discard chats that depended on it.
   const filename = dataset.original_filename || 'this dataset'
   if (
     !window.confirm(
@@ -568,9 +686,6 @@ async function deleteDatasetAndRelatedData(dataset) {
     if (relatedChatIds.has(activeChatId)) {
       setChatInput('')
       setChatError('')
-      setSqlInput('')
-      setSqlError('')
-      setSqlResult(null)
       if (remainingChats.length) {
         setActiveChatId(remainingChats[0].id)
       } else {
@@ -591,6 +706,9 @@ async function deleteDatasetAndRelatedData(dataset) {
 
 // Add a message to a specific conversation.
 function appendChatMessage(chatId, message) {
+  const messageList = chatMessagesRef.current
+  shouldAutoScrollRef.current = !messageList
+    || messageList.scrollHeight - messageList.scrollTop - messageList.clientHeight < 100
   updateChat(chatId, (chat) => {
     const messages = [...chat.messages, message]
 
@@ -611,6 +729,7 @@ function appendChatMessage(chatId, message) {
 }
 
 async function saveChatDatasetSelection(datasetId, selected) {
+  // Save sheet selection to the conversation and enforce the five-sheet limit.
   if (!activeChat) return
   const currentIds = activeChat.selectedDatasetIds || []
   const nextIds = selected
@@ -661,6 +780,7 @@ function getResponseText(data) {
 }
 
 async function sendChatQuestion(text = chatInput, retryRequestId) {
+  // Persist a user question, request an evidence-grounded answer, and retain retry identity.
   const query = text.trim()
 
   if (!query || chatLoading) return
@@ -688,6 +808,14 @@ async function sendChatQuestion(text = chatInput, retryRequestId) {
       ? chatRetry.requestId
       : crypto.randomUUID()
   )
+  const controller = new AbortController()
+  activeChatRequestRef.current = {
+    controller,
+    chatId,
+    kind: 'answer',
+    query,
+    requestId,
+  }
 
   setChatInput('')
   setChatError('')
@@ -709,7 +837,13 @@ async function sendChatQuestion(text = chatInput, retryRequestId) {
   let answerReceived = false
   let answer = ''
   try {
-    const response = await askConversation(chatId, query, 5, requestId)
+    const response = await askConversation(
+      chatId,
+      query,
+      5,
+      requestId,
+      controller.signal,
+    )
     answerReceived = true
     setChatRetry(null)
     answer = getResponseText(response)
@@ -720,11 +854,18 @@ async function sendChatQuestion(text = chatInput, retryRequestId) {
       question: response.question || query,
       requestId,
       sources: response.sources || [],
+      structuredAnswer: response.structured_answer || null,
+      sql: response.sql || null,
+      sqlResult: response.sql_result || null,
+      sqlSources: response.sql_sources || [],
       graphRetrieval: response.graph_retrieval || {},
+      graphWarning: response.graph_warning || '',
       status: response.status || 'success',
       createdAt: new Date().toISOString(),
     })
   } catch (err) {
+    if (controller.signal.aborted) return
+
     if (answerReceived) {
       appendChatMessage(chatId, {
         id: crypto.randomUUID(),
@@ -764,132 +905,159 @@ async function sendChatQuestion(text = chatInput, retryRequestId) {
       )
     }
   } finally {
-    setChatLoading(false)
+    if (activeChatRequestRef.current?.controller === controller) {
+      activeChatRequestRef.current = null
+      setChatLoading(false)
+    }
   }
 }
 
+function stopCurrentRequest() {
+  const activeRequest = activeChatRequestRef.current
+  if (!activeRequest) return
 
+  activeChatRequestRef.current = null
+  activeRequest.controller.abort()
+  setChatLoading(false)
+  setSqlLoading(false)
+  appendChatMessage(activeRequest.chatId, {
+    id: crypto.randomUUID(),
+    role: 'assistant',
+    intent: activeRequest.kind === 'sql'
+      ? 'sql_analysis'
+      : undefined,
+    content: activeRequest.kind === 'sql'
+      ? 'SQL analysis stopped.'
+      : 'Answer generation stopped.',
+    question: activeRequest.query,
+    requestId: activeRequest.requestId,
+    status: 'cancelled',
+    createdAt: new Date().toISOString(),
+  })
+}
 
-async function runSqlQuestion(question = sqlInput, { appendToChat = false } = {}) {
+async function runSqlQuestion(question = chatInput, mode = 'analysis') {
+  // Request chat-scoped SQL analysis or code generation and append its result to history.
   const questionText = question.trim()
 
   if (!questionText || sqlLoading) return
 
+  const chat = activeChat
+  if (!chat) {
+    setChatError('Create a chat before generating an analysis.')
+    return
+  }
+
   const selectedDatasets = getDatasetsForChat(activeChat, datasets)
 
   if (!selectedDatasets.length) {
-    setSqlError(
+    setChatError(
       'Select a dataset for this chat before running SQL analysis.',
     )
     return
   }
 
-  setSqlLoading(true)
-  setSqlError('')
-  setSqlResult(null)
-
-  let sqlWorkflowCompleted = false
-  if (appendToChat && activeChat) {
-    setChatInput('')
-    appendChatMessage(activeChat.id, {
-      id: crypto.randomUUID(),
-      role: 'user',
-      content: questionText,
-      intent: 'sql',
-      createdAt: new Date().toISOString(),
-    })
+  const chatId = chat.id
+  const requestId = crypto.randomUUID()
+  const controller = new AbortController()
+  activeChatRequestRef.current = {
+    controller,
+    chatId,
+    kind: 'sql',
+    query: questionText,
+    requestId,
   }
+  setSqlLoading(true)
+  setSqlLoadingMode(mode)
+  setChatError('')
+  setChatInput('')
+  appendChatMessage(chatId, {
+    id: crypto.randomUUID(),
+    role: 'user',
+    content: questionText,
+    question: questionText,
+    requestId,
+    intent: mode === 'code_generation'
+      ? 'sql_code_generation'
+      : 'sql_analysis',
+    sqlMode: mode,
+    createdAt: new Date().toISOString(),
+  })
 
   try {
-    const response = await askConversationSQL(activeChat.id, questionText)
-
-    const payload = response
-
-    if (
-      !payload ||
-      typeof payload !== 'object' ||
-      payload.status !== 'success'
-    ) {
-      throw new Error(
-        payload?.error || 'SQL analysis returned an invalid response.',
-      )
-    }
-
-    const queryResult = payload.result
-
-    if (
-      !queryResult ||
-      typeof queryResult !== 'object' ||
-      !Array.isArray(queryResult.columns) ||
-      !Array.isArray(queryResult.rows)
-    ) {
-      throw new Error(
-        'SQL analysis returned results in an unexpected format.',
-      )
-    }
-
-    sqlWorkflowCompleted = true
-    setSqlResult({
-      question: payload.question || questionText,
-      sql: payload.sql || '',
-      status: queryResult.status || 'success',
-      columns: queryResult.columns,
-      rows: queryResult.rows,
-      rowCount: queryResult.row_count ?? queryResult.rows.length,
+    const response = await analyzeConversationSQL(
+      chatId,
+      questionText,
+      requestId,
+      mode,
+      controller.signal,
+    )
+    const analysis = response.analysis
+    const completedCount = analysis.queries.filter(
+      (query) => query.execution_status === 'success',
+    ).length
+    const content = analysis.clarification
+      || (analysis.mode === 'code_generation'
+        ? `${analysis.analysis_title}: SQL code generated; none executed.`
+        : `${analysis.analysis_title}: ${completedCount} of ${analysis.queries.length} result tables completed.`)
+    updateChat(chatId, (current) => ({
+      ...current,
+      title: current.title === 'New chat'
+        ? questionText.slice(0, 48)
+        : current.title,
+      updatedAt: new Date().toISOString(),
+    }))
+    appendChatMessage(chatId, {
+      id: response.events?.assistant || crypto.randomUUID(),
+      role: 'assistant',
+      intent: mode === 'code_generation'
+        ? 'sql_code_generation'
+        : 'sql_analysis',
+      sqlMode: mode,
+      content,
+      question: questionText,
+      requestId,
+      sqlAnalysis: analysis,
+      status: analysis.status || 'success',
+      createdAt: new Date().toISOString(),
     })
-    if (activeChat) {
-      const queryId = response.events?.query
-      const graphQuery = {
-        query_id: queryId,
-        question: payload.question || questionText,
-        sql: payload.sql || '',
-        dataset_ids: selectedDatasets.map((dataset) => dataset.dataset_id),
-        dataset_id: selectedDatasets[0].dataset_id,
-        dataset_name: selectedDatasets.map((dataset) => dataset.original_filename).join(', '),
-        table_name: selectedDatasets.map((dataset) => dataset.table_name).join(', '),
-        read_columns: queryResult.read_columns || [],
-        result_columns: queryResult.columns,
-        rows: queryResult.rows,
-        row_count: queryResult.row_count ?? queryResult.rows.length,
-        executed_at: new Date().toISOString(),
-      }
-      updateChat(activeChat.id, (chat) => ({
-        ...chat,
-        title:
-          chat.title === 'New chat'
-            ? questionText.slice(0, 48)
-            : chat.title,
-        graphQueries: [
-          ...(chat.graphQueries || []),
-          graphQuery,
-        ],
-        updatedAt: new Date().toISOString(),
-      }))
-      if (appendToChat) {
-        appendChatMessage(activeChat.id, {
-          id: queryId || crypto.randomUUID(),
-          role: 'assistant',
-          intent: 'sql',
-          content: `SQL generated and executed. ${graphQuery.row_count} rows returned.`,
-          sql: graphQuery.sql,
-          sqlResult: {
-            columns: graphQuery.result_columns,
-            rows: graphQuery.rows,
-            rowCount: graphQuery.row_count,
-          },
-          question: questionText,
-          status: 'success',
-          createdAt: graphQuery.executed_at,
-        })
-      }
-    }
   } catch (err) {
-    const errorMessage = sqlWorkflowCompleted
-      ? `SQL completed, but its graph history could not be saved: ${err.message}`
-      : err.message || 'SQL analysis failed. Please try again.'
-    setSqlError(errorMessage)
+    if (controller.signal.aborted) return
+
+    const errorMessage = err.message || 'SQL analysis failed. Please try again.'
+    setChatError(errorMessage)
+    appendChatMessage(chatId, {
+      id: crypto.randomUUID(),
+      role: 'assistant',
+      intent: mode === 'code_generation'
+        ? 'sql_code_generation'
+        : 'sql_analysis',
+      sqlMode: mode,
+      content: `SQL analysis failed: ${errorMessage}`,
+      question: questionText,
+      requestId,
+      status: 'failed',
+      createdAt: new Date().toISOString(),
+    })
   } finally {
-    setSqlLoading(false)
+    if (activeChatRequestRef.current?.controller === controller) {
+      activeChatRequestRef.current = null
+      setSqlLoading(false)
+    }
+  }
+}
+
+async function approveAndRetrySQLRelationship(relationship, question) {
+  // Record explicit join approval before asking Analyst to generate the query again.
+  if (!activeChat?.id) return
+  try {
+    await approveConversationSQLRelationship(
+      activeChat.id,
+      relationship.relationship_id,
+    )
+    await runSqlQuestion(question)
+  } catch (err) {
+    setChatError(err.message || 'Could not approve this sheet relationship.')
   }
 }
 
@@ -907,10 +1075,12 @@ async function runSqlQuestion(question = sqlInput, { appendToChat = false } = {}
   )
 
   function openPage(page) {
+    // Keep navigation changes inside the single-page application.
     setActivePage(page)
   }
 
   function handleFileChange(event) {
+    // Reject unsupported or oversized uploads before sending them to the backend.
     const file = event.target.files?.[0]
 
     setSelectedFile(null)
@@ -920,6 +1090,7 @@ async function runSqlQuestion(question = sqlInput, { appendToChat = false } = {}
 
     if (!file) return
 
+    setSourceToolsOpen(true)
     const extension = getFileExtension(file.name)
 
     if (!ACCEPTED_EXTENSIONS.includes(extension)) {
@@ -944,6 +1115,7 @@ async function runSqlQuestion(question = sqlInput, { appendToChat = false } = {}
   }
 
   async function handleUpload(event) {
+    // Upload a validated file, associate its sheets with the active chat, then refresh data.
     event.preventDefault()
 
     if (!selectedFile || uploading) return
@@ -959,9 +1131,9 @@ async function runSqlQuestion(question = sqlInput, { appendToChat = false } = {}
         setUploadProgress(progress)
       })
 
-      setUploadSuccess(
-        response.message || `${selectedFile.name} uploaded successfully.`,
-      )
+      const uploadMessage =
+        response.message || `${selectedFile.name} uploaded successfully.`
+      setUploadSuccess(uploadMessage)
       const stored = response.storage
       if (
         !stored ||
@@ -970,49 +1142,66 @@ async function runSqlQuestion(question = sqlInput, { appendToChat = false } = {}
         !Array.isArray(stored.columns)
       ) {
         throw new Error(
-          'The upload completed, but graph metadata was missing from the response.',
+          'The upload completed, but dataset details were missing from the response.',
         )
       }
 
       if (uploadChatId) {
         const uploadedAt = new Date().toISOString()
+        const storedSheets = Array.isArray(stored.sheets) && stored.sheets.length
+          ? stored.sheets
+          : [stored]
+        if (storedSheets.some((sheet) => (
+          typeof sheet.dataset_id !== 'string' ||
+          typeof sheet.content_fingerprint !== 'string' ||
+          !Array.isArray(sheet.columns)
+        ))) {
+          throw new Error('The server returned incomplete worksheet details.')
+        }
+
         const filename = stored.filename || selectedFile.name
         const titleFromFilename = filename.replace(/\.[^.]+$/, '')
-        const uploadRecord = {
+        const uploadRecords = storedSheets.map((sheet) => ({
           upload_id: crypto.randomUUID(),
-          dataset_id: stored.dataset_id,
-          filename,
-          table_name: stored.table_name,
-          row_count: stored.row_count,
-          column_count: stored.column_count,
-          content_fingerprint: stored.content_fingerprint,
-          columns: stored.columns,
+          dataset_id: sheet.dataset_id,
+          filename: sheet.filename || filename,
+          sheet_name: sheet.sheet_name || null,
+          table_name: sheet.table_name,
+          row_count: sheet.row_count,
+          column_count: sheet.column_count,
+          content_fingerprint: sheet.content_fingerprint,
+          columns: sheet.columns,
+          duplicate: Boolean(sheet.duplicate),
           uploaded_at: uploadedAt,
-        }
+        }))
         const uploadChat = chatSessions.find(
           (chat) => chat.id === uploadChatId,
         )
         const selectedDatasetIds = uploadChat?.selectedDatasetIds || (
           uploadChat?.datasetId ? [uploadChat.datasetId] : []
         )
-        const nextSelectedDatasetIds = selectedDatasetIds.includes(
-          stored.dataset_id,
-        )
-          ? selectedDatasetIds
-          : selectedDatasetIds.length < 5
-            ? [...selectedDatasetIds, stored.dataset_id]
-            : selectedDatasetIds
+        const nextSelectedDatasetIds = [...new Set([
+          ...selectedDatasetIds,
+          ...uploadRecords.map((record) => record.dataset_id),
+        ])].slice(0, 5)
+        const unselectedSheetCount = uploadRecords.filter(
+          (record) => !nextSelectedDatasetIds.includes(record.dataset_id),
+        ).length
 
         await updateConversationDatasets(
           uploadChatId,
           nextSelectedDatasetIds,
         )
-        await addConversationEvent(
-          uploadChatId,
-          'upload',
-          filename,
-          uploadRecord,
-        )
+        for (const uploadRecord of uploadRecords) {
+          await addConversationEvent(
+            uploadChatId,
+            'upload',
+            uploadRecord.sheet_name
+              ? `${filename} - ${uploadRecord.sheet_name}`
+              : filename,
+            uploadRecord,
+          )
+        }
         updateChat(uploadChatId, (chat) => ({
           ...chat,
           selectedDatasetIds: nextSelectedDatasetIds,
@@ -1023,10 +1212,15 @@ async function runSqlQuestion(question = sqlInput, { appendToChat = false } = {}
               : chat.title,
           uploads: [
             ...(chat.uploads || []),
-            uploadRecord,
+            ...uploadRecords,
           ],
           updatedAt: uploadedAt,
         }))
+        setUploadSuccess(
+          unselectedSheetCount
+            ? `${uploadMessage} ${unselectedSheetCount} sheet${unselectedSheetCount === 1 ? '' : 's'} could not be selected because chats can use at most five sheets.`
+            : uploadMessage,
+        )
       }
       setSelectedFile(null)
 
@@ -1043,6 +1237,7 @@ async function runSqlQuestion(question = sqlInput, { appendToChat = false } = {}
   }
 
   function submitQuestion(event) {
+  // Route the landing-page question into the analyst chat composer.
   event.preventDefault()
 
   const query = question.trim()
@@ -1055,7 +1250,135 @@ async function runSqlQuestion(question = sqlInput, { appendToChat = false } = {}
 }
   
 
+  function renderSheetManager(layout) {
+    // Render current sheet chips and the searchable, capped sheet selector.
+    const searchId = `${layout}-sheet-search`
+
+    return (
+      <>
+        <div className="selected-sheet-strip" aria-label="Selected sheets">
+          {activeChatDatasets.length ? (
+            activeChatDatasets.map((dataset) => {
+              const label = [
+                dataset.original_filename || 'Uploaded spreadsheet',
+                dataset.sheet_name,
+              ].filter(Boolean).join(' · ')
+              return (
+                <span
+                  className="selected-sheet-chip"
+                  key={dataset.dataset_id}
+                  title={label}
+                >
+                  <span>{label}</span>
+                  <button
+                    type="button"
+                    aria-label={`Remove ${label}`}
+                    onClick={() => saveChatDatasetSelection(
+                      dataset.dataset_id,
+                      false,
+                    )}
+                  >
+                    ×
+                  </button>
+                </span>
+              )
+            })
+          ) : (
+            <span className="selected-sheet-empty">No sheets selected</span>
+          )}
+        </div>
+        {datasetPickerOpen && (
+          <div
+            className="sheet-picker-popover"
+            id="spreadsheet-picker"
+            role="region"
+            aria-label="Search and select spreadsheets"
+          >
+            <div className="sheet-picker-heading">
+              <strong>Choose existing sheets</strong>
+              <div>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploading}
+                >
+                  + Upload spreadsheet
+                </button>
+                <button
+                  type="button"
+                  className="sheet-picker-done"
+                  onClick={() => {
+                    setDatasetPickerOpen(false)
+                    setDatasetSearch('')
+                  }}
+                >
+                  Done
+                </button>
+              </div>
+            </div>
+            <label className="sheet-picker-search" htmlFor={searchId}>
+              <span>Search files and sheets</span>
+              <input
+                id={searchId}
+                type="search"
+                value={datasetSearch}
+                onChange={(event) => setDatasetSearch(event.target.value)}
+                placeholder="Search CSV or worksheet name"
+              />
+            </label>
+            {filteredDatasets.length ? (
+              <div className="sheet-picker-list">
+                {filteredDatasets.map((dataset) => {
+                  const selected = activeChat?.selectedDatasetIds?.includes(
+                    dataset.dataset_id,
+                  ) || false
+                  const atLimit =
+                    (activeChat?.selectedDatasetIds?.length || 0) >= 5
+                  const label = [
+                    dataset.original_filename || 'Uploaded spreadsheet',
+                    dataset.sheet_name || dataset.sheet,
+                  ].filter(Boolean).join(' · ')
+                  return (
+                    <label
+                      className={`sheet-picker-option ${selected ? 'selected' : ''}`}
+                      key={dataset.dataset_id}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selected}
+                        disabled={!selected && atLimit}
+                        onChange={(event) => saveChatDatasetSelection(
+                          dataset.dataset_id,
+                          event.target.checked,
+                        )}
+                      />
+                      <span>
+                        <strong>{label}</strong>
+                        <small>
+                          {formatNumber(dataset.row_count)} rows ·{' '}
+                          {formatNumber(dataset.column_count)} columns
+                        </small>
+                      </span>
+                    </label>
+                  )
+                })}
+              </div>
+            ) : (
+              <p className="analyst-no-sources">
+                {datasets.length
+                  ? `No files or sheets match “${datasetSearch}”.`
+                  : 'No saved spreadsheets yet. Upload a CSV, XLS, or XLSX file.'}
+              </p>
+            )}
+          </div>
+        )}
+      </>
+    )
+  }
+
   function renderDatasetTable() {
+    // Render dataset loading, error, empty, and populated states for the dataset page.
     if (loading) {
       return <p className="dataset-message">Loading datasets…</p>
     }
@@ -1182,9 +1505,7 @@ async function runSqlQuestion(question = sqlInput, { appendToChat = false } = {}
               {group.items.map((item) => (
                 <button
                   key={item.id}
-                  className={`nav-item ${
-                    activePage === item.id ? 'active' : ''
-                  }`}
+                  className={`nav-item ${activePage === item.id ? 'active' : ''}`}
                   onClick={() => openPage(item.id)}
                   aria-current={activePage === item.id ? 'page' : undefined}
                 >
@@ -1221,10 +1542,9 @@ async function runSqlQuestion(question = sqlInput, { appendToChat = false } = {}
                   type="button"
                   className="chat-history-item"
                   onClick={() => {
+                    shouldAutoScrollRef.current = true
                     setActiveChatId(chat.id)
                     setChatError('')
-                    setSqlError('')
-                    setSqlResult(null)
                     setActivePage('analyst')
                   }}
                   title={chat.title}
@@ -1266,13 +1586,13 @@ async function runSqlQuestion(question = sqlInput, { appendToChat = false } = {}
                     ? 'Checking API…'
                     : 'API unavailable'}
               </strong>
-              <small>
+              {/* <small>
                 {apiStatus === 'connected'
                   ? 'FastAPI is responding'
                   : apiStatus === 'checking'
                     ? 'Connecting to backend'
                     : 'Check backend and try again'}
-              </small>
+              </small> */}
             </span>
           </div>
 
@@ -1418,7 +1738,10 @@ async function runSqlQuestion(question = sqlInput, { appendToChat = false } = {}
                     <span className="metric-icon blue">▤</span>
                     <span className="metric-label">DATASETS</span>
                   </div>
-                  <strong className="metric-value">
+                  <strong
+                    className={`metric-value ${loading ? 'is-loading' : ''}`}
+                    aria-busy={loading}
+                  >
                     {loading ? '…' : error ? '—' : datasets.length}
                   </strong>
                   <p>Stored datasets</p>
@@ -1427,10 +1750,10 @@ async function runSqlQuestion(question = sqlInput, { appendToChat = false } = {}
                 <article className="metric-card">
                   <div className="metric-top">
                     <span className="metric-icon purple">✳</span>
-                    <span className="metric-label">AI QUESTIONS</span>
+                    <span className="metric-label">AI QUESTIONING</span>
                   </div>
-                  <strong className="metric-value">—</strong>
-                  <p>Usage tracking not connected</p>
+                  <strong className="metric-value"> </strong>
+                  <p>Ask AI for insights</p>
                 </article>
 
                 <article className="metric-card">
@@ -1438,7 +1761,10 @@ async function runSqlQuestion(question = sqlInput, { appendToChat = false } = {}
                     <span className="metric-icon green">⌘</span>
                     <span className="metric-label">TOTAL ROWS</span>
                   </div>
-                  <strong className="metric-value">
+                  <strong
+                    className={`metric-value ${loading ? 'is-loading' : ''}`}
+                    aria-busy={loading}
+                  >
                     {loading ? '…' : error ? '—' : formatNumber(totalRows)}
                   </strong>
                   <p>Across stored datasets</p>
@@ -1449,7 +1775,10 @@ async function runSqlQuestion(question = sqlInput, { appendToChat = false } = {}
                     <span className="metric-icon amber">◎</span>
                     <span className="metric-label">TOTAL COLUMNS</span>
                   </div>
-                  <strong className="metric-value">
+                  <strong
+                    className={`metric-value ${loading ? 'is-loading' : ''}`}
+                    aria-busy={loading}
+                  >
                     {loading ? '…' : error ? '—' : formatNumber(totalColumns)}
                   </strong>
                   <p>Across stored datasets</p>
@@ -1511,7 +1840,7 @@ async function runSqlQuestion(question = sqlInput, { appendToChat = false } = {}
 
           {activePage === 'datasets' && (
             <>
-              <section className="page-intro">
+              <section className="page-intro dataset-page-intro">
                 <p className="eyebrow">DATA MANAGEMENT</p>
                 <h1>Your datasets</h1>
                 <p>
@@ -1520,7 +1849,7 @@ async function runSqlQuestion(question = sqlInput, { appendToChat = false } = {}
                 </p>
               </section>
 
-              <section className="section-block upload-panel">
+              <section className="section-block upload-panel dataset-page-section dataset-upload-section">
                 <div className="section-heading">
                   <div>
                     <h2>Upload a spreadsheet</h2>
@@ -1556,7 +1885,9 @@ async function runSqlQuestion(question = sqlInput, { appendToChat = false } = {}
                       disabled={!selectedFile || uploading}
                     >
                       {uploading
-                        ? 'Uploading…'
+                        ? uploadProgress >= 100
+                          ? 'Processing…'
+                          : 'Uploading…'
                         : 'Upload spreadsheet'}
                     </button>
                   </div>
@@ -1564,8 +1895,14 @@ async function runSqlQuestion(question = sqlInput, { appendToChat = false } = {}
                   {uploading && (
                     <div className="upload-progress">
                       <div className="upload-progress-heading">
-                        <span>Uploading spreadsheet</span>
-                        <strong>{uploadProgress}%</strong>
+                        {uploadProgress >= 100 ? (
+                          <span>Processing worksheets and indexing data…</span>
+                        ) : (
+                          <>
+                            <span>Uploading spreadsheet</span>
+                            <strong>{uploadProgress}%</strong>
+                          </>
+                        )}
                       </div>
                       <progress
                         value={uploadProgress}
@@ -1591,7 +1928,7 @@ async function runSqlQuestion(question = sqlInput, { appendToChat = false } = {}
                 </form>
               </section>
 
-              <section className="section-block">
+              <section className="section-block dataset-page-section dataset-list-section">
                 <div className="section-heading">
                   <div>
                     <h2>Stored datasets</h2>
@@ -1639,121 +1976,16 @@ async function runSqlQuestion(question = sqlInput, { appendToChat = false } = {}
         </div>
       </header>
 
-      <section className="analyst-sources" aria-label="Choose spreadsheets">
-        <div className="analyst-sources-heading">
-          <div>
-            <h2>Your spreadsheets</h2>
-            <p>
-              Select up to five files for this chat
-              {' · '}
-              {activeChat?.selectedDatasetIds?.length || 0} selected
-            </p>
-          </div>
-          <button
-            type="button"
-            className="secondary-button analyst-add-file"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploading}
-          >
-            + Add spreadsheet
-          </button>
-        </div>
-
-        {selectedFile && (
-          <form className="analyst-selected-file" onSubmit={handleUpload}>
-            <div className="analyst-selected-file-copy">
-              <span className="analyst-file-icon" aria-hidden="true">▤</span>
-              <span>
-                <strong>{selectedFile.name}</strong>
-                <small>{(selectedFile.size / 1024).toFixed(1)} KB · Ready to upload</small>
-              </span>
-            </div>
-            <button
-              type="button"
-              className="analyst-remove-file"
-              onClick={() => {
-                setSelectedFile(null)
-                setUploadError('')
-                if (fileInputRef.current) fileInputRef.current.value = ''
-              }}
-              disabled={uploading}
-            >
-              Remove
-            </button>
-            <button
-              type="submit"
-              className="primary-button analyst-upload-button"
-              disabled={uploading}
-            >
-              {uploading ? `Uploading ${uploadProgress}%…` : 'Upload and select'}
-            </button>
-          </form>
-        )}
-
-        {uploading && (
-          <progress
-            className="analyst-upload-progress"
-            value={uploadProgress}
-            max="100"
-            aria-label="Upload progress"
-          />
-        )}
-        {uploadError && (
-          <p className="analyst-source-feedback error" role="alert">
-            {uploadError}
-          </p>
-        )}
-        {uploadSuccess && (
-          <p className="analyst-source-feedback success" role="status">
-            {uploadSuccess}
-          </p>
-        )}
-
-        {datasets.length ? (
-          <div className="analyst-source-list">
-            {datasets.map((dataset) => {
-              const selected = activeChat?.selectedDatasetIds?.includes(
-                dataset.dataset_id,
-              ) || false
-              const atSelectionLimit =
-                (activeChat?.selectedDatasetIds?.length || 0) >= 5
-
-              return (
-                <label
-                  className={`analyst-source-option ${selected ? 'selected' : ''}`}
-                  key={dataset.dataset_id}
-                >
-                  <input
-                    type="checkbox"
-                    checked={selected}
-                    disabled={!selected && atSelectionLimit}
-                    onChange={(event) => saveChatDatasetSelection(
-                      dataset.dataset_id,
-                      event.target.checked,
-                    )}
-                  />
-                  <span className="analyst-file-icon" aria-hidden="true">▤</span>
-                  <span className="analyst-source-copy">
-                    <strong>{dataset.original_filename || 'Uploaded spreadsheet'}</strong>
-                    <small>
-                      {formatNumber(dataset.row_count)} rows
-                      {' · '}
-                      {formatNumber(dataset.column_count)} columns
-                    </small>
-                  </span>
-                </label>
-              )
-            })}
-          </div>
-        ) : (
-          <p className="analyst-no-sources">
-            No spreadsheets yet. Add a CSV, XLS, or XLSX file to get started
-            (maximum 10 MB).
-          </p>
-        )}
-      </section>
-
-      <div className="chat-messages" aria-live="polite">
+      <div
+        className="chat-messages"
+        aria-live="polite"
+        ref={chatMessagesRef}
+        onScroll={(event) => {
+          const element = event.currentTarget
+          shouldAutoScrollRef.current =
+            element.scrollHeight - element.scrollTop - element.clientHeight < 100
+        }}
+      >
         {!activeChat?.messages?.length && (
           <div className="chat-empty-state">
             <div className="chat-welcome-icon">✳</div>
@@ -1765,7 +1997,7 @@ async function runSqlQuestion(question = sqlInput, { appendToChat = false } = {}
             <p>
               {activeChatDatasets.length
                 ? 'Ask for a summary, comparison, calculation, or trend.'
-                : 'Select a saved file above or add a new spreadsheet.'}
+                : 'Choose a saved spreadsheet or upload one from the controls below.'}
             </p>
             <div className="chat-suggestion-list">
               {[
@@ -1796,17 +2028,78 @@ async function runSqlQuestion(question = sqlInput, { appendToChat = false } = {}
                 {message.role === 'user' ? 'Y' : '✳'}
               </span>
               {message.role === 'user' ? 'You' : 'GraphSheet AI'}
-              {message.intent === 'sql' && <span className="intent-badge">SQL</span>}
+              {['sql', 'sql_analysis', 'sql_code_generation'].includes(message.intent) && (
+                <span className="intent-badge">SQL</span>
+              )}
             </span>
 
             <div className="markdown-content">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>
                 {message.content || ''}
               </ReactMarkdown>
+              {message.role === 'assistant' && message.structuredAnswer && (
+                <StructuredAnswer
+                  answer={message.structuredAnswer}
+                  onFollowUp={(suggestion) => sendChatQuestion(suggestion)}
+                  onError={setChatError}
+                  disabled={chatLoading || sqlLoading}
+                />
+              )}
+              {message.role === 'assistant' &&
+                !message.sql &&
+                message.sqlSources?.length > 0 && (
+                  <p className="chat-sql-sources">
+                    Calculated from:{' '}
+                    {message.sqlSources.map((source) => (
+                      [
+                        source.filename,
+                        source.sheet_name,
+                      ].filter(Boolean).join(' — ')
+                    )).join(', ')}
+                  </p>
+                )}
+              {message.role === 'assistant' && message.sqlAnalysis && (
+                <SQLAnalysisResults
+                  analysis={message.sqlAnalysis}
+                  onApproveRelationship={(relationship) => (
+                    approveAndRetrySQLRelationship(
+                      relationship,
+                      message.question,
+                    )
+                  )}
+                />
+              )}
               {message.sql && (
                 <details className="chat-sql-details">
-                  <summary>View generated SQL</summary>
-                  <pre><code>{message.sql}</code></pre>
+                  <summary>View generated SQL and query result</summary>
+                  {message.sqlSources?.length > 0 && (
+                    <p className="chat-sql-sources">
+                      Source sheets:{' '}
+                      {message.sqlSources.map((source) => (
+                        [
+                          source.filename,
+                          source.sheet_name,
+                        ].filter(Boolean).join(' — ')
+                      )).join(', ')}
+                    </p>
+                  )}
+                  <div className="chat-sql-actions">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!navigator.clipboard?.writeText) {
+                          setChatError('Clipboard access is unavailable in this browser.')
+                          return
+                        }
+                        navigator.clipboard.writeText(message.sql).catch(() => {
+                          setChatError('Could not copy SQL. Please select and copy it manually.')
+                        })
+                      }}
+                    >
+                      Copy SQL
+                    </button>
+                  </div>
+                  <HighlightedSQL code={message.sql} />
                   {message.sqlResult?.columns?.length > 0 && (
                     <div className="chat-sql-table-wrap">
                       <table className="chat-sql-table">
@@ -1846,6 +2139,11 @@ async function runSqlQuestion(question = sqlInput, { appendToChat = false } = {}
                   </button>
                 </div>
               )}
+              {message.role === 'assistant' && message.graphWarning && (
+                <p className="chat-graph-warning" role="status">
+                  {message.graphWarning}
+                </p>
+              )}
               {message.role === 'assistant' &&
                 message.status === 'failed' &&
                 message.question &&
@@ -1854,9 +2152,15 @@ async function runSqlQuestion(question = sqlInput, { appendToChat = false } = {}
                     type="button"
                     className="secondary-button chat-retry-button"
                     disabled={chatLoading || sqlLoading}
-                    onClick={() => sendChatQuestion(
-                      message.question,
-                      message.requestId,
+                    onClick={() => (
+                      ['sql_analysis', 'sql_code_generation'].includes(message.intent)
+                        ? runSqlQuestion(
+                          message.question,
+                          (message.sqlAnalysis?.mode || message.sqlMode) === 'code_generation'
+                            ? 'code_generation'
+                            : 'analysis',
+                        )
+                        : sendChatQuestion(message.question, message.requestId)
                     )}
                   >
                     Retry question
@@ -1870,10 +2174,13 @@ async function runSqlQuestion(question = sqlInput, { appendToChat = false } = {}
           <p className="loading-message">Analyzing selected sheets…</p>
         )}
         {sqlLoading && (
-          <p className="loading-message">Generating and safely running SQL…</p>
+          <p className="loading-message">
+            {sqlLoadingMode === 'code_generation'
+              ? 'Generating SQL code…'
+              : 'Generating and safely running SQL…'}
+          </p>
         )}
         {chatError && <p className="error-message" role="alert">{chatError}</p>}
-        {sqlError && <p className="error-message" role="alert">{sqlError}</p>}
       </div>
 
       <form
@@ -1883,6 +2190,89 @@ async function runSqlQuestion(question = sqlInput, { appendToChat = false } = {}
           sendChatQuestion()
         }}
       >
+        <div
+          className="chat-source-panel"
+          id="chat-source-panel"
+          hidden={!sourceToolsOpen}
+        >
+          <div className="chat-source-toolbar-actions">
+            <button
+              type="button"
+              className="secondary-button chat-source-button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+            >
+              <span aria-hidden="true">＋</span> Upload file
+            </button>
+            <button
+              type="button"
+              className="secondary-button chat-source-button"
+              onClick={() => setDatasetPickerOpen((open) => !open)}
+              disabled={uploading}
+              aria-expanded={datasetPickerOpen}
+              aria-controls="spreadsheet-picker"
+            >
+              <span aria-hidden="true">▤</span> Select files
+            </button>
+          </div>
+          {renderSheetManager('analyst')}
+
+          {selectedFile && (
+            <div className="analyst-selected-file">
+              <div className="analyst-selected-file-copy">
+                <span className="analyst-file-icon" aria-hidden="true">▤</span>
+                <span>
+                  <strong>{selectedFile.name}</strong>
+                  <small>{(selectedFile.size / 1024).toFixed(1)} KB · Ready to upload</small>
+                </span>
+              </div>
+              <button
+                type="button"
+                className="analyst-remove-file"
+                onClick={() => {
+                  setSelectedFile(null)
+                  setUploadError('')
+                  if (fileInputRef.current) fileInputRef.current.value = ''
+                }}
+                disabled={uploading}
+              >
+                Remove
+              </button>
+              <button
+                type="button"
+                className="primary-button analyst-upload-button"
+                onClick={handleUpload}
+                disabled={uploading}
+              >
+                {uploading
+                  ? uploadProgress >= 100
+                    ? 'Processing worksheets…'
+                    : `Uploading ${uploadProgress}%…`
+                  : uploadError ? 'Retry upload' : 'Upload and select'}
+              </button>
+            </div>
+          )}
+
+          {uploading && (
+            <progress
+              className="analyst-upload-progress"
+              value={uploadProgress}
+              max="100"
+              aria-label="Upload progress"
+            />
+          )}
+          {uploadError && (
+            <p className="analyst-source-feedback error" role="alert">
+              {uploadError}
+            </p>
+          )}
+          {uploadSuccess && (
+            <p className="analyst-source-feedback success" role="status">
+              {uploadSuccess}
+            </p>
+          )}
+        </div>
+
         <textarea
           value={chatInput}
           onChange={(event) => setChatInput(event.target.value)}
@@ -1901,25 +2291,66 @@ async function runSqlQuestion(question = sqlInput, { appendToChat = false } = {}
           <span>Enter to ask · Shift + Enter for a new line</span>
           <div>
             <button
+              type="button"
+              className={`chat-attachment-toggle ${sourceToolsOpen ? 'active' : ''}`}
+              onClick={() => {
+                setSourceToolsOpen((open) => !open)
+                if (sourceToolsOpen) setDatasetPickerOpen(false)
+              }}
+              disabled={uploading}
+              aria-label={sourceToolsOpen ? 'Hide file selection controls' : 'Show file selection controls'}
+              aria-expanded={sourceToolsOpen}
+              aria-controls="chat-source-panel"
+              title={sourceToolsOpen ? 'Hide spreadsheet controls' : 'Attach or select spreadsheets'}
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="m21.4 11.1-8.5 8.5a5.7 5.7 0 0 1-8.1-8.1l9.2-9.2a3.8 3.8 0 0 1 5.4 5.4l-9.2 9.2a1.9 1.9 0 0 1-2.7-2.7l8.5-8.5" />
+              </svg>
+              <span className="chat-attachment-label">Files</span>
+              <span className="chat-attachment-count">
+                {activeChatDatasets.length}
+              </span>
+            </button>
+            <button
               className="secondary-button"
               type="button"
               disabled={chatLoading || sqlLoading || !chatInput.trim() || !activeChatDatasets.length}
-              onClick={() => runSqlQuestion(chatInput, { appendToChat: true })}
+              onClick={() => runSqlQuestion(chatInput, 'analysis')}
             >
-              {sqlLoading ? 'Running SQL…' : '⌘ Generate SQL'}
+              {sqlLoading ? 'Working…' : '⌘ Analyze with SQL'}
             </button>
             <button
-              className="primary-button"
-              type="submit"
+              className="secondary-button"
+              type="button"
               disabled={chatLoading || sqlLoading || !chatInput.trim() || !activeChatDatasets.length}
+              onClick={() => runSqlQuestion(chatInput, 'code_generation')}
             >
-              {chatLoading ? 'Analyzing…' : 'Ask question ↑'}
+              Generate SQL code
             </button>
+            {chatLoading || sqlLoading ? (
+              <button
+                className="chat-stop-button"
+                type="button"
+                onClick={stopCurrentRequest}
+                aria-label="Stop the current response"
+                title="Stop the current response"
+              >
+                <span aria-hidden="true">■</span> Stop
+              </button>
+            ) : (
+              <button
+                className="primary-button"
+                type="submit"
+                disabled={!chatInput.trim() || !activeChatDatasets.length}
+              >
+                Ask question ↑
+              </button>
+            )}
           </div>
         </div>
         {!activeChatDatasets.length && (
           <p className="chat-selection-hint">
-            Select at least one spreadsheet above to ask a question.
+            Select at least one spreadsheet or upload a file to ask a question.
           </p>
         )}
       </form>
@@ -1938,189 +2369,6 @@ async function runSqlQuestion(question = sqlInput, { appendToChat = false } = {}
   </section>
 )}
 
-
-{activePage === 'sql' && (
-  <section className="workspace-page sql-page">
-    <div className="workspace-heading">
-      <p className="eyebrow">GRAPHSHEET AI</p>
-      <h1>SQL Studio</h1>
-      <p>
-        Ask a question and let the backend generate and execute a
-        read-only SQL query.
-      </p>
-    </div>
-
-    <div className="dataset-selector">
-      <label>Active dataset</label>
-      <p>
-        {getDatasetsForChat(activeChat, datasets)
-          .map((dataset) => dataset.original_filename)
-          .join(', ') ||
-          'Select a dataset in Analyst first.'}
-      </p>
-
-      <button
-        type="button"
-        className="secondary-button"
-        onClick={() => setActivePage('analyst')}
-      >
-        Choose dataset
-      </button>
-    </div>
-
-    <form
-      className="sql-composer"
-      onSubmit={(event) => {
-        event.preventDefault()
-        runSqlQuestion()
-      }}
-    >
-      <label htmlFor="sql-question">
-        What would you like to query?
-      </label>
-
-      <textarea
-        id="sql-question"
-        value={sqlInput}
-        onChange={(event) => setSqlInput(event.target.value)}
-        placeholder="Example: Show the top 5 products by revenue."
-        rows={4}
-        disabled={sqlLoading}
-      />
-
-      <button
-        type="submit"
-        className="primary-button"
-        disabled={sqlLoading || !sqlInput.trim()}
-      >
-        {sqlLoading ? 'Running...' : 'Run analysis'}
-      </button>
-    </form>
-
-    {sqlError && (
-      <p className="error-message" role="alert">
-        {sqlError}
-      </p>
-    )}
-
-    {sqlResult && (
-      <section className="sql-result">
-        <div className="sql-result-heading">
-          <div>
-            <p className="eyebrow">QUERY EXECUTION</p>
-            <h2>Results</h2>
-          </div>
-
-          <span className="sql-status">
-            {sqlResult.status === 'success'
-              ? 'Completed'
-              : sqlResult.status}
-          </span>
-        </div>
-
-        <p className="sql-result-question">
-          {sqlResult.question}
-        </p>
-
-        <SQLResultChart
-          columns={sqlResult.columns}
-          rows={sqlResult.rows}
-        />
-
-        <div className="sql-code-section">
-          <div className="sql-section-heading">
-            <h3>Generated SQL</h3>
-
-            {sqlResult.sql && (
-              <button
-                type="button"
-                className="secondary-button"
-                onClick={() => {
-                  if (navigator.clipboard?.writeText) {
-                    navigator.clipboard
-                      .writeText(sqlResult.sql)
-                      .catch(() => {
-                        setSqlError(
-                          'Could not copy SQL. Please select and copy it manually.',
-                        )
-                      })
-                  } else {
-                    setSqlError(
-                      'Clipboard access is unavailable in this browser.',
-                    )
-                  }
-                }}
-              >
-                Copy SQL
-              </button>
-            )}
-          </div>
-
-          <pre className="sql-code">
-            <code>
-              {sqlResult.sql || 'No SQL query was returned.'}
-            </code>
-          </pre>
-        </div>
-
-        <div className="sql-data-section">
-          <div className="sql-section-heading">
-            <h3>Query output</h3>
-            <span>
-              {sqlResult.rowCount} rows
-            </span>
-          </div>
-
-          {sqlResult.columns.length === 0 ? (
-            <p className="sql-empty-state">
-              The query completed without returning tabular columns.
-            </p>
-          ) : sqlResult.rows.length === 0 ? (
-            <p className="sql-empty-state">
-              The query returned no matching records.
-            </p>
-          ) : (
-            <div className="sql-table-wrapper">
-              <table className="sql-data-table">
-                <thead>
-                  <tr>
-                    {sqlResult.columns.map((column, index) => (
-                      <th key={`${column}-${index}`}>
-                        {column}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-
-                <tbody>
-                  {sqlResult.rows.map((row, rowIndex) => (
-                    <tr key={rowIndex}>
-                      {sqlResult.columns.map((column, columnIndex) => {
-                        const value = row[column]
-
-                        return (
-                          <td key={`${column}-${columnIndex}`}>
-                            {value === null || value === undefined
-                              ? '—'
-                              : typeof value === 'object'
-                                ? JSON.stringify(value)
-                                : String(value)}
-                          </td>
-                        )
-                      })}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      </section>
-    )}
-  </section>
-)}
- 
-
 {activePage === 'knowledge' && (
   <KnowledgeGraph
     chat={activeChat}
@@ -2132,17 +2380,15 @@ async function runSqlQuestion(question = sqlInput, { appendToChat = false } = {}
           updatedAt: new Date().toISOString(),
         }))
       }
-      setSqlError('')
-      setActivePage('sql')
+      setActivePage('analyst')
     }}
   />
 )}
 
 {activePage !== 'overview' &&
-  activePage !== 'datasets' &&
-  activePage !== 'analyst' &&
-  activePage !== 'sql' &&
-  activePage !== 'knowledge' && (
+activePage !== 'datasets' &&
+activePage !== 'analyst' &&
+activePage !== 'knowledge' && (
     <section className="placeholder-page">
       <span className="placeholder-icon">
         {navigation.flatMap((group) => group.items)

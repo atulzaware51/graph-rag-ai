@@ -117,7 +117,7 @@ def test_retrieve_chunks_respects_top_k(monkeypatch):
     assert len(results) == 1
 
 
-def test_retrieve_chunks_returns_empty_for_no_matches(monkeypatch):
+def test_retrieve_chunks_returns_empty_when_no_terms_match(monkeypatch):
     monkeypatch.setattr(
         "backend.app.services.retrieval.get_dataset_chunks",
         lambda dataset_id, database_path: fake_chunks(),
@@ -204,6 +204,41 @@ def test_retrieve_chunks_for_datasets_ranks_only_selected_sheets(monkeypatch):
 
     assert calls == ["sheet-a", "sheet-b"]
     assert [item["chunk_id"] for item in results] == ["b-1", "a-1"]
+
+
+def test_retrieve_chunks_for_datasets_includes_vector_only_matches(
+    tmp_path,
+    monkeypatch,
+):
+    database = tmp_path / "vectors.db"
+    database.touch()
+    monkeypatch.setattr(
+        "backend.app.services.retrieval.get_dataset_chunks",
+        lambda dataset_id, database_path: [],
+    )
+    monkeypatch.setattr(
+        "backend.app.services.retrieval.search_similar_chunks",
+        lambda query, dataset_ids, top_k, database_path: [
+            {
+                "chunk_id": "semantic-only",
+                "dataset_id": "sheet-a",
+                "chunk_index": 0,
+                "text": "Solar lamp with rechargeable battery",
+                "metadata": {"source_rows": [2]},
+                "vector_similarity": 0.9,
+            }
+        ],
+    )
+
+    results = retrieve_chunks_for_datasets(
+        "camping light",
+        ["sheet-a"],
+        database_path=database,
+    )
+
+    assert [result["chunk_id"] for result in results] == ["semantic-only"]
+    assert results[0]["matched_terms"] == []
+    assert results[0]["vector_similarity"] == 0.9
 
 
 def test_retrieve_chunks_for_datasets_rejects_more_than_five():

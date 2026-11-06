@@ -1,3 +1,5 @@
+"""Handle spreadsheet uploads and return prepared dataset information."""
+
 # Import Path class for object-oriented filesystem path manipulation
 from pathlib import Path
 # Import NamedTemporaryFile utility to create disk-backed temporary files
@@ -5,20 +7,30 @@ from tempfile import NamedTemporaryFile
 
 # Import FastAPI routing, file upload, status codes, and HTTP exception handling utilities
 from fastapi import APIRouter, File, HTTPException, UploadFile, status
+import logging
 
 # Import dataset storage error class and store function from database storage service
 from backend.app.services.dataset_store import (
     DatasetStorageError,  # Custom exception raised when storing data or chunks fails
+    delete_spreadsheet,
     store_spreadsheet,    # Function to save dataset rows, metadata, and chunks into SQLite
+    update_dataset_graph_status,
 )
 # Import spreadsheet ingestion error class and inspector function from ingestion service
 from backend.app.services.ingestion import (
     IngestionError,       # Custom exception raised when validating or parsing spreadsheet fails
+    get_spreadsheet_sheet_names,
     inspect_spreadsheet, # Function to parse spreadsheet, build previews, and generate chunks
 )
+from backend.app.services.graph_service import (
+    GraphServiceError,
+    build_graph_from_database,
+)
+from backend.app.services.sql_service import DEFAULT_DATABASE
 
 # Instantiate a FastAPI router with URL prefix '/documents' and OpenAPI documentation tag
 router = APIRouter(prefix="/documents", tags=["Documents"])
+logger = logging.getLogger(__name__)
 
 # Define maximum allowed upload payload size in bytes (10 Megabytes)
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
@@ -86,20 +98,101 @@ async def upload_spreadsheet(file: UploadFile = File(...)):
                 detail="The uploaded file is empty.",
             )
 
-        # Step 1: Parse and inspect the spreadsheet file to extract metadata, preview rows, and text chunks
-        preview = inspect_spreadsheet(temporary_path, filename)
+        sheet_names = get_spreadsheet_sheet_names(temporary_path, filename)
+        inspected_sheets = [
+            inspect_spreadsheet(
+                temporary_path,
+                filename,
+                sheet_name=sheet_name,
+            )
+            for sheet_name in sheet_names
+        ]
+        stored_sheets = []
+        created_dataset_ids = []
+        try:
+            for inspected in inspected_sheets:
+                stored = store_spreadsheet(
+                    file_path=temporary_path,
+                    original_filename=filename,
+                    chunks=inspected["chunks"],
+                    sheet_name=inspected["sheet_name"],
+                )
+                if not stored.get("duplicate"):
+                    created_dataset_ids.append(stored["dataset_id"])
+                stored_sheets.append(stored)
+        except DatasetStorageError:
+            cleanup_errors = []
+            for dataset_id in created_dataset_ids:
+                try:
+                    if not delete_spreadsheet(dataset_id):
+                        cleanup_errors.append(dataset_id)
+                except DatasetStorageError:
+                    cleanup_errors.append(dataset_id)
+            if cleanup_errors:
+                raise DatasetStorageError(
+                    "The workbook could not be stored completely, and some "
+                    "partially stored sheets could not be removed."
+                )
+            raise
 
-        # Step 2: Persist the spreadsheet data, column schema, and generated text chunks into SQLite
-        stored_dataset = store_spreadsheet(
-            file_path=temporary_path,
-            original_filename=filename,
-            chunks=preview["chunks"],
-        )
+        dataset_ids = [
+            item["dataset_id"]
+            for item in stored_sheets
+            if isinstance(item.get("dataset_id"), str)
+        ]
+        if dataset_ids:
+            try:
+                build_graph_from_database(
+                    DEFAULT_DATABASE,
+                    dataset_ids=dataset_ids,
+                    include_evidence=True,
+                )
+                for item in stored_sheets:
+                    item["graph_build_status"] = "complete"
+                    item["graph_error"] = None
+            except GraphServiceError as exc:
+                logger.exception(
+                    "Knowledge graph build failed after spreadsheet upload."
+                )
+                try:
+                    update_dataset_graph_status(
+                        dataset_ids,
+                        "failed",
+                        str(exc),
+                        DEFAULT_DATABASE,
+                    )
+                except DatasetStorageError:
+                    logger.exception(
+                        "Could not persist failed graph status after upload."
+                    )
+                for item in stored_sheets:
+                    item["graph_build_status"] = "failed"
+                    item["graph_error"] = str(exc)
 
-        # Return successful response payload containing inspection preview and database storage metadata
+        stored_dataset = {
+            **stored_sheets[0],
+            "sheets": stored_sheets,
+        }
+        public_sheets = [
+            {
+                key: value
+                for key, value in inspected.items()
+                if key != "chunks"
+            }
+            for inspected in inspected_sheets
+        ]
+        preview = {
+            **public_sheets[0],
+            "sheets": public_sheets,
+        }
+        all_reused = all(item.get("duplicate") for item in stored_sheets)
         return {
             "status": "success",
-            "message": "Spreadsheet inspected, chunked, and saved successfully.",
+            "message": (
+                "This spreadsheet is already available. Existing sheets were reused."
+                if all_reused
+                else "Spreadsheet sheets were inspected and processed successfully."
+            ),
             "data": preview,
             "storage": stored_dataset,
         }

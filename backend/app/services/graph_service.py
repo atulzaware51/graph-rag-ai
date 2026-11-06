@@ -1,6 +1,8 @@
 
 """Integrate stored datasets and inferred relationships into a graph."""
 
+import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +29,7 @@ from backend.app.services.graph_store import (
     get_persisted_graph,
     replace_graph,
 )
+from backend.app.services import neo4j_store
 from backend.app.services.relationship_inference import (
     RelationshipInferenceError,
     infer_relationships,
@@ -38,6 +41,51 @@ from backend.app.services.schema_profiler import (
 
 
 DEFAULT_DATABASE_PATH = Path("data/graphsheet.db")
+logger = logging.getLogger(__name__)
+
+
+def _graph_matches_persisted(
+    graph: dict[str, Any],
+    persisted_graph: dict[str, Any],
+    dataset_ids: list[str],
+) -> bool:
+    """Avoid rewriting graph storage when the selected graph is unchanged."""
+    builds = persisted_graph.get("builds", [])
+    if len(builds) != len(dataset_ids) or any(
+        not isinstance(build, dict)
+        or build.get("status") != "complete"
+        or build.get("dataset_id") not in dataset_ids
+        for build in builds
+    ):
+        return False
+
+    def signatures(items: Any, identifier: str) -> dict[str, str] | None:
+        """Create order-independent fingerprints for nodes or edges by ID."""
+        if not isinstance(items, list):
+            return None
+        result = {}
+        for item in items:
+            if not isinstance(item, dict) or not isinstance(item.get(identifier), str):
+                return None
+            result[item[identifier]] = json.dumps(
+                item,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                default=str,
+            )
+        return result
+
+    expected_nodes = signatures(graph.get("nodes"), "id")
+    stored_nodes = signatures(persisted_graph.get("nodes"), "id")
+    expected_edges = signatures(graph.get("edges"), "id")
+    stored_edges = signatures(persisted_graph.get("edges"), "id")
+    return (
+        expected_nodes is not None
+        and expected_nodes == stored_nodes
+        and expected_edges is not None
+        and expected_edges == stored_edges
+    )
 
 
 class GraphServiceError(Exception):
@@ -50,6 +98,7 @@ class GraphServiceError(Exception):
         code: str | None = None,
         retry_after_seconds: int | None = None,
     ) -> None:
+        """Carry a stable API code and retry delay with graph build failures."""
         super().__init__(message)
         self.code = code
         self.retry_after_seconds = retry_after_seconds
@@ -198,15 +247,50 @@ def build_graph_from_database(
         selected_dataset_ids = [
             dataset["dataset_id"] for dataset in graph_datasets
         ]
-        replace_graph(
-            graph,
-            selected_dataset_ids,
-            database_url=graph_database_url_for_source(database),
-        )
-        persisted_graph = get_persisted_graph(
-            dataset_ids=selected_dataset_ids,
-            database_url=graph_database_url_for_source(database),
-        )
+        use_neo4j = bool(selected_dataset_ids) and neo4j_store.is_configured()
+        if use_neo4j:
+            try:
+                persisted_graph = neo4j_store.get_dataset_graph(
+                    dataset_ids=selected_dataset_ids,
+                )
+                if not _graph_matches_persisted(
+                    graph,
+                    persisted_graph,
+                    selected_dataset_ids,
+                ):
+                    neo4j_store.replace_dataset_graph(
+                        graph,
+                        selected_dataset_ids,
+                    )
+                    persisted_graph = neo4j_store.get_dataset_graph(
+                        dataset_ids=selected_dataset_ids,
+                    )
+            except neo4j_store.Neo4jStoreError as exc:
+                logger.warning(
+                    "Neo4j knowledge graph unavailable (%s); using the SQL graph store.",
+                    exc.code,
+                )
+                use_neo4j = False
+
+        if not use_neo4j:
+            persisted_graph = get_persisted_graph(
+                dataset_ids=selected_dataset_ids,
+                database_url=graph_database_url_for_source(database),
+            )
+            if not _graph_matches_persisted(
+                graph,
+                persisted_graph,
+                selected_dataset_ids,
+            ):
+                replace_graph(
+                    graph,
+                    selected_dataset_ids,
+                    database_url=graph_database_url_for_source(database),
+                )
+                persisted_graph = get_persisted_graph(
+                    dataset_ids=selected_dataset_ids,
+                    database_url=graph_database_url_for_source(database),
+                )
         graph_nodes = persisted_graph["nodes"]
         graph_edges = persisted_graph["edges"]
         if not include_evidence:
@@ -234,9 +318,13 @@ def build_graph_from_database(
             "edge_count": len(graph_edges),
             "nodes": graph_nodes,
             "edges": graph_edges,
-            "graph_store": get_database_engine(
-                graph_database_url_for_source(database)
-            ).dialect.name,
+            "graph_store": (
+                "neo4j"
+                if use_neo4j
+                else get_database_engine(
+                    graph_database_url_for_source(database)
+                ).dialect.name
+            ),
         }
 
     except (
@@ -247,6 +335,7 @@ def build_graph_from_database(
         RelationshipInferenceError,
         GraphBuilderError,
         GraphPersistenceError,
+        neo4j_store.Neo4jStoreError,
     ) as exc:
         raise GraphServiceError(
             f"Could not build knowledge graph: {exc}"

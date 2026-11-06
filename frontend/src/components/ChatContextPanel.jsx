@@ -1,3 +1,4 @@
+// Display selected-sheet previews, question evidence, and graph context beside a chat.
 import { useEffect, useMemo, useState } from 'react'
 import ForceGraph2D from 'react-force-graph-2d'
 import useElementWidth from '../hooks/useElementWidth'
@@ -9,6 +10,7 @@ import {
 import './ChatContextPanel.css'
 
 function getFilename(dataset) {
+  // Keep the context panel readable for records without a stored filename.
   return dataset?.original_filename || 'Uploaded sheet'
 }
 
@@ -22,6 +24,7 @@ export default function ChatContextPanel({
   onTabChange,
   onManageSheets,
 }) {
+  // Fetch only context linked to this chat and its currently selected sheets.
   const [graph, setGraph] = useState({ nodes: [], edges: [] })
   const [previews, setPreviews] = useState({})
   const [evidence, setEvidence] = useState([])
@@ -48,6 +51,7 @@ export default function ChatContextPanel({
   const evidenceKey = sources.map((source) => source.chunk_id).join(',')
 
   useEffect(() => {
+    // Load previews, conversation graph, and cited evidence as one synchronized view.
     let active = true
 
     async function loadContext() {
@@ -208,6 +212,9 @@ export default function ChatContextPanel({
                       <span className="used-sheet-copy">
                         <strong>{getFilename(dataset)}</strong>
                         <small>
+                          {dataset.sheet_name
+                            ? `${dataset.sheet_name} · `
+                            : ''}
                           {dataset.column_count} columns · {Number(dataset.row_count).toLocaleString()} rows
                         </small>
                       </span>
@@ -237,24 +244,47 @@ export default function ChatContextPanel({
               <p className="context-muted">Loading cited evidence…</p>
             ) : displayedEvidence.length ? (
               <div className="evidence-list">
-                {displayedEvidence.map((item) => (
-                  <article className="evidence-card" key={item.chunk_id}>
-                    <header>
-                      <strong>Chunk {(item.chunk_index ?? 0) + 1}</strong>
-                      <span>Score {item.score}</span>
-                    </header>
-                    <pre>{item.text}</pre>
-                    {item.graph_matches?.length > 0 && (
-                      <div className="evidence-matches">
-                        {item.graph_matches.map((match) => (
-                          <span key={`${item.chunk_id}-${match.sql_name}`}>
-                            {match.column || match.sql_name}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </article>
-                ))}
+                {displayedEvidence.map((item) => {
+                  const sourceDataset = datasets.find(
+                    (dataset) => dataset.dataset_id === item.dataset_id,
+                  )
+                  return (
+                    <article className="evidence-card" key={item.chunk_id}>
+                      <header>
+                        <strong>Chunk {(item.chunk_index ?? 0) + 1}</strong>
+                        <span>Score {item.score}</span>
+                      </header>
+                      <small className="evidence-provenance">
+                        {getFilename(sourceDataset)}
+                        {sourceDataset?.sheet_name
+                          ? ` · ${sourceDataset.sheet_name}`
+                          : ''}
+                        {' · '}
+                        {item.chunk_id}
+                      </small>
+                      {item.metadata?.source_rows?.length > 0 && (
+                        <small className="evidence-provenance">
+                          Source rows: {item.metadata.source_rows.join(', ')}
+                        </small>
+                      )}
+                      {item.matched_terms?.length > 0 && (
+                        <small className="evidence-provenance">
+                          Matched terms: {item.matched_terms.join(', ')}
+                        </small>
+                      )}
+                      <pre>{item.text}</pre>
+                      {item.graph_matches?.length > 0 && (
+                        <div className="evidence-matches">
+                          {item.graph_matches.map((match) => (
+                            <span key={`${item.chunk_id}-${match.sql_name}`}>
+                              {match.column || match.sql_name}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </article>
+                  )
+                })}
               </div>
             ) : (
               <p className="context-muted">

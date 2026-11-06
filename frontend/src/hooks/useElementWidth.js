@@ -1,3 +1,4 @@
+// Share an element's measured width with responsive graph visualizations.
 import { useCallback, useEffect, useState } from 'react'
 
 export default function useElementWidth() {
@@ -7,6 +8,7 @@ export default function useElementWidth() {
     setElement(node)
   }, [])
 
+  // Observe the current DOM element so canvas sizes follow layout changes.
   useEffect(() => {
     if (!element) return undefined
 

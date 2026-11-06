@@ -1,6 +1,8 @@
 
+// Load and interactively filter either a chat's activity graph or the dataset graph.
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import ForceGraph2D from 'react-force-graph-2d'
+import HighlightedSQL from './HighlightedSQL'
 import {
   getConversationGraph,
   getKnowledgeGraph,
@@ -8,6 +10,7 @@ import {
 import './KnowledgeGraph.css'
 
 export default function KnowledgeGraph({ chat, onQuery }) {
+  // Keep the selected graph, filters, and focused node local to this explorer.
   const [graph, setGraph] = useState({ nodes: [], edges: [] })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -19,6 +22,7 @@ export default function KnowledgeGraph({ chat, onQuery }) {
     let active = true
 
     async function loadGraph() {
+      // Chat pages use the conversation graph; the general page uses the dataset graph.
       try {
         setLoading(true)
         setError('')
@@ -51,6 +55,7 @@ export default function KnowledgeGraph({ chat, onQuery }) {
   }, [chat])
 
   const visibleGraph = useMemo(() => {
+    // Apply node search first, then retain only edges whose endpoints remain visible.
     const term = search.trim().toLowerCase()
 
     const nodes = graph.nodes.filter((node) => {
@@ -98,6 +103,7 @@ export default function KnowledgeGraph({ chat, onQuery }) {
   const queryCount = graph.nodes.filter(
     (node) => node.type === 'Query',
   ).length
+  // Derive a chronological activity list from uploads and executed queries.
   const timelineEvents = graph.nodes
     .filter((node) => node.type === 'Upload' || node.type === 'Query')
     .sort(
@@ -120,9 +126,9 @@ export default function KnowledgeGraph({ chat, onQuery }) {
       ctx.beginPath()
       ctx.arc(node.x, node.y, radius, 0, 2 * Math.PI)
       ctx.fillStyle = isMain
-        ? '#1d4ed8'
+        ? '#3b82f6'
         : isDataset
-          ? '#2563eb'
+          ? '#3b82f6'
           : node.type === 'Query'
             ? '#7c3aed'
             : node.type === 'Result'
@@ -134,7 +140,7 @@ export default function KnowledgeGraph({ chat, onQuery }) {
 
       if (isSelected) {
         ctx.lineWidth = 2 / globalScale
-        ctx.strokeStyle = '#111827'
+        ctx.strokeStyle = '#1e3a5f'
         ctx.stroke()
       }
 
@@ -338,7 +344,7 @@ export default function KnowledgeGraph({ chat, onQuery }) {
               {selectedNode.sql && (
                 <>
                   <dt>Executed SQL</dt>
-                  <dd><pre className="kg-sql">{selectedNode.sql}</pre></dd>
+                  <dd><HighlightedSQL code={selectedNode.sql} /></dd>
                 </>
               )}
 

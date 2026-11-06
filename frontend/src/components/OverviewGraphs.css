@@ -1,3 +1,4 @@
+/* Lay out compact graph cards for individual uploaded datasets. */
 .overview-graphs-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
@@ -7,9 +8,9 @@
 .overview-graph-card {
   min-width: 0;
   overflow: hidden;
-  border: 1px solid var(--border-light);
+  border: 1px solid #c5dcf5;
   border-radius: var(--radius-md);
-  background: var(--bg-panel);
+  background: #f8fbff;
 }
 
 .overview-graph-heading {
@@ -22,7 +23,7 @@
 
 .overview-graph-heading h3 {
   overflow-wrap: anywhere;
-  color: var(--text-primary);
+  color: #17324d;
   font-size: 0.95rem;
   font-weight: 600;
 }
@@ -30,22 +31,23 @@
 .overview-graph-heading time {
   display: block;
   margin-top: 4px;
-  color: var(--text-muted);
+  color: #4b6178;
   font-size: 0.75rem;
 }
 
 .overview-entity-count {
   flex: 0 0 auto;
   padding: 4px 8px;
-  border: 1px solid var(--border-light);
+  border: 1px solid #c5dcf5;
   border-radius: 999px;
-  color: var(--text-secondary);
+  background: #eaf4ff;
+  color: #234766;
   font-size: 0.7rem;
 }
 
 .overview-graph-canvas {
   height: 220px;
-  background: #0e1117;
+  background: #eaf4ff;
 }
 
 .overview-graph-canvas p {
@@ -53,7 +55,7 @@
   height: 100%;
   place-items: center;
   padding: 16px;
-  color: var(--text-muted);
+  color: #4b6178;
   font-size: 0.85rem;
   text-align: center;
 }
@@ -62,7 +64,7 @@
   display: flex;
   gap: 16px;
   padding: 0 18px 14px;
-  color: var(--text-muted);
+  color: #4b6178;
   font-size: 0.72rem;
 }
 
@@ -95,6 +97,7 @@
 }
 
 .overview-graphs-status.error {
-  border-color: var(--error);
-  color: #fca5a5;
+  border-color: #e7aaa7;
+  background: #fff4f3;
+  color: #a11b1b;
 }

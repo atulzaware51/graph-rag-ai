@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from threading import RLock
 from typing import Any
+from weakref import WeakSet
 
 from sqlalchemy import (
     Column,
@@ -135,6 +137,8 @@ _GRAPH_TABLES = {
     "graph_builds": graph_builds,
 }
 _ENGINES: set[Engine] = set()
+_INITIALIZED_ENGINES: WeakSet[Engine] = WeakSet()
+_INITIALIZATION_LOCK = RLock()
 
 
 def database_url_for_path(database_path: str | Path) -> str:
@@ -153,6 +157,7 @@ def graph_database_url_for_source(database_path: str | Path) -> str:
 
 
 def _normalize_database_url(database_url: str | None) -> str:
+    """Normalize legacy PostgreSQL URL schemes to the installed psycopg driver."""
     url = database_url or get_database_url()
     if url.startswith("postgres://"):
         return "postgresql+psycopg://" + url[len("postgres://"):]
@@ -163,6 +168,7 @@ def _normalize_database_url(database_url: str | None) -> str:
 
 @lru_cache(maxsize=8)
 def _engine_for_url(normalized_url: str) -> Engine:
+    """Create and cache an engine, configuring SQLite for concurrent app use."""
     url = make_url(normalized_url)
     if url.get_backend_name() == "sqlite":
         database = url.database
@@ -170,7 +176,10 @@ def _engine_for_url(normalized_url: str) -> Engine:
             Path(database).parent.mkdir(parents=True, exist_ok=True)
         engine = create_engine(
             url,
-            connect_args={"check_same_thread": False},
+            connect_args={
+                "check_same_thread": False,
+                "timeout": 5.0,
+            },
         )
         _ENGINES.add(engine)
 
@@ -179,8 +188,10 @@ def _engine_for_url(normalized_url: str) -> Engine:
             dbapi_connection: Any,
             _connection_record: Any,
         ) -> None:
+            """Enable referential cleanup and bounded lock waiting on each connection."""
             cursor = dbapi_connection.cursor()
             cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.execute("PRAGMA busy_timeout=5000")
             cursor.close()
 
         return engine
@@ -197,9 +208,17 @@ def get_database_engine(database_url: str | None = None) -> Engine:
 def initialize_database(database_url: str | None = None) -> None:
     """Create graph tables and migrate legacy conversation graph tables safely."""
     engine = get_database_engine(database_url)
-    if engine.dialect.name == "sqlite":
-        _migrate_legacy_conversation_graph(engine)
-    metadata.create_all(engine, tables=list(_GRAPH_TABLES.values()))
+    with _INITIALIZATION_LOCK:
+        if engine in _INITIALIZED_ENGINES:
+            return
+        if engine.dialect.name == "sqlite":
+            database = make_url(engine.url).database
+            if database and database != ":memory:":
+                with engine.connect() as connection:
+                    connection.exec_driver_sql("PRAGMA journal_mode=WAL")
+            _migrate_legacy_conversation_graph(engine)
+        metadata.create_all(engine, tables=list(_GRAPH_TABLES.values()))
+        _INITIALIZED_ENGINES.add(engine)
 
 
 def _migrate_legacy_conversation_graph(engine: Engine) -> None:
@@ -239,6 +258,7 @@ def dispose_database_engines() -> None:
     for engine in _ENGINES:
         engine.dispose()
     _ENGINES.clear()
+    _INITIALIZED_ENGINES.clear()
     _engine_for_url.cache_clear()
 
 

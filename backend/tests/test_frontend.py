@@ -13,8 +13,14 @@ def test_frontend_and_static_assets_are_served():
 
     assert page.status_code == 200
     assert "GraphSheet AI" in page.text
+    assert 'id="analyst-datasets"' in page.text
+    assert 'id="analyst-history"' in page.text
+    assert "Generate SQL analysis" in page.text
+    assert 'id="sql-form"' not in page.text
     assert script.status_code == 200
     assert "loadDatasets" in script.text
+    assert '"sql-analysis"' in script.text
+    assert "/sql-relationships/" in script.text
     assert styles.status_code == 200
 
 

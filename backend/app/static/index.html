@@ -1,3 +1,4 @@
+<!-- Framework-free app shell; app.js fills the page's data, chat, and graph panels. -->
 <!doctype html>
 <html lang="en">
   <head>
@@ -5,8 +6,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#f5f7fb">
     <title>GraphSheet AI</title>
-    <link rel="stylesheet" href="/app/styles.css">
-    <script src="/app/app.js" defer></script>
+    <link rel="stylesheet" href="/app/styles.css?v=2">
+    <script src="/app/app.js?v=2" defer></script>
   </head>
   <body>
     <header class="site-header">
@@ -26,6 +27,7 @@
 
       <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
 
+      <!-- Upload panel collects the spreadsheet that populates the workspace. -->
       <section class="panel upload-panel" aria-labelledby="upload-title">
         <div>
           <p class="eyebrow">GET STARTED</p>
@@ -79,33 +81,35 @@
         </section>
       </div>
 
-      <div class="content-grid question-grid">
-        <section class="panel" aria-labelledby="rag-title">
-          <p class="eyebrow">GROUNDED ANSWERS</p>
-          <h2 id="rag-title">Ask your data</h2>
-          <p class="muted">Answers use retrieved spreadsheet evidence and include source references.</p>
-          <form id="rag-form" class="question-form">
-            <label for="rag-question">Question</label>
-            <textarea id="rag-question" rows="3" maxlength="2000" placeholder="What stands out in these records?" required></textarea>
-            <button class="button button-primary" type="submit">Get an answer</button>
-          </form>
-          <div id="rag-result" class="result-box empty-state">Your answer and evidence references will appear here.</div>
-        </section>
+      <!-- Analyst panel supports evidence-grounded answers and safe SQL analysis. -->
+      <section class="panel analyst-panel" aria-labelledby="analyst-title">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">GROUNDED ANSWERS + READ-ONLY SQL</p>
+            <h2 id="analyst-title">AI Analyst</h2>
+            <p class="muted">Choose up to five sheets. Ask for an evidence-backed answer or generate multiple independent SQL result tables in this chat.</p>
+          </div>
+        </div>
+        <fieldset class="analyst-dataset-picker">
+          <legend>Sheets used by this chat <span class="schema-meta">(up to 5)</span></legend>
+          <div id="analyst-datasets" class="analyst-dataset-list">
+            <p class="empty-state">Upload or refresh datasets to select sheets.</p>
+          </div>
+        </fieldset>
+        <div id="analyst-history" class="analyst-history" aria-live="polite">
+          <p class="empty-state">Your questions, answers, generated SQL, and result tables will appear here.</p>
+        </div>
+        <form id="analyst-form" class="question-form">
+          <label for="analyst-question">Ask a question</label>
+          <textarea id="analyst-question" rows="3" maxlength="2000" placeholder="Compare total sales by region and product category." required></textarea>
+          <div class="analyst-actions">
+            <button class="button button-primary" type="submit" data-mode="sql_analysis">Generate SQL analysis</button>
+            <button class="button button-secondary" type="submit" data-mode="evidence">Answer from sheet evidence</button>
+          </div>
+        </form>
+      </section>
 
-        <section class="panel" aria-labelledby="sql-title">
-          <p class="eyebrow">READ-ONLY ANALYSIS</p>
-          <h2 id="sql-title">Ask with SQL</h2>
-          <p class="muted">Natural-language questions are translated into a dataset-scoped read-only query.</p>
-          <form id="sql-form" class="question-form">
-            <label for="sql-question">Question</label>
-            <textarea id="sql-question" rows="3" maxlength="2000" placeholder="How many rows are in each category?" required></textarea>
-            <button class="button button-primary" type="submit">Run analysis</button>
-          </form>
-          <div id="sql-result" class="result-box empty-state">Query results will appear here.</div>
-          <div id="sql-chart" class="chart" aria-label="Chart of query results"></div>
-        </section>
-      </div>
-
+      <!-- Graph panel exposes schema links and heuristic relationship candidates. -->
       <section class="panel graph-panel" aria-labelledby="graph-title">
         <div class="panel-heading">
           <div>

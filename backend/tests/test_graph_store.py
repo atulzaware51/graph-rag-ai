@@ -1,5 +1,6 @@
 import json
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from sqlalchemy import select
@@ -21,6 +22,7 @@ from backend.app.services.graph_store import (
     get_persisted_graph,
     replace_graph,
 )
+from backend.app.services import neo4j_store
 from backend.app.services.graph_service import build_graph_from_database
 from backend.app.services.dataset_store import delete_spreadsheet, store_spreadsheet
 
@@ -232,6 +234,27 @@ def test_failed_rebuild_rolls_back_old_graph_and_build_record(tmp_path):
     assert restored["builds"][0]["status"] == "complete"
 
 
+def test_concurrent_graph_replacements_remain_readable(tmp_path):
+    url = database_url_for_path(tmp_path / "concurrent.db")
+    graphs = [
+        graph_for("sales", value=f"Revenue {index}")
+        for index in range(8)
+    ]
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = [
+            executor.submit(replace_graph, graph, ["sales"], database_url=url)
+            for graph in graphs
+        ]
+        for future in futures:
+            future.result()
+
+    persisted = get_persisted_graph(dataset_ids=["sales"], database_url=url)
+    assert len(persisted["nodes"]) == 3
+    assert len(persisted["builds"]) == 1
+    assert persisted["builds"][0]["status"] == "complete"
+
+
 def test_dataset_deletion_clears_its_persistent_graph(tmp_path):
     source = tmp_path / "sales.csv"
     source.write_text("Revenue\n42\n", encoding="utf-8")
@@ -345,3 +368,23 @@ def test_database_schema_compiles_for_postgresql():
     assert "PRIMARY KEY (workspace_id, dataset_id, node_id)" in node_ddl
     assert "FOREIGN KEY(workspace_id, source_dataset_id, source_id)" in edge_ddl
     assert "FOREIGN KEY(workspace_id, target_dataset_id, target_id)" in edge_ddl
+
+
+def test_delete_dataset_graph_routes_to_neo4j_when_configured(monkeypatch):
+    deleted = []
+    monkeypatch.setattr(neo4j_store, "is_configured", lambda: True)
+    monkeypatch.setattr(
+        neo4j_store,
+        "delete_dataset_graph",
+        lambda dataset_id: deleted.append(dataset_id),
+    )
+    monkeypatch.setattr(
+        "backend.app.services.graph_store.initialize_database",
+        lambda *_args, **_kwargs: pytest.fail(
+            "The configured Neo4j store should handle graph deletion."
+        ),
+    )
+
+    delete_dataset_graph("dataset-1", database_url="sqlite:///:memory:")
+
+    assert deleted == ["dataset-1"]

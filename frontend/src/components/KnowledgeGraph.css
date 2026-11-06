@@ -1,4 +1,5 @@
 
+/* Style the graph explorer, its filters, timeline, canvas, and selected-node details. */
 .kg-page {
   display: flex;
   flex-direction: column;
@@ -70,6 +71,7 @@
   color: #111827;
 }
 
+/* Align search and relationship-type filters above the graph canvas. */
 .kg-toolbar {
   display: flex;
   gap: 12px;
@@ -176,6 +178,7 @@
   font-size: 13px;
 }
 
+/* Present uploads and executed queries in chronological order. */
 .kg-timeline {
   display: flex;
   gap: 10px;
@@ -217,6 +220,7 @@
   white-space: nowrap;
 }
 
+/* Keep the graph canvas and selected-node details side by side. */
 .kg-workspace {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 260px;
@@ -346,6 +350,7 @@
   overflow-wrap: anywhere;
 }
 
+/* Move details below the graph on smaller screens. */
 @media (max-width: 900px) {
   .kg-workspace {
     grid-template-columns: minmax(0, 1fr);
@@ -376,5 +381,110 @@
 
   .kg-toolbar select {
     flex-basis: 100%;
+  }
+}
+
+/* Use pale blue graph surfaces with dark, high-contrast labels and controls. */
+.kg-page {
+  color: #17324d;
+}
+
+.kg-header h2,
+.kg-stat strong,
+.kg-details h3,
+.kg-details dd,
+.kg-timeline span {
+  color: #17324d;
+}
+
+.kg-header p,
+.kg-stat span,
+.kg-legend,
+.kg-timeline time,
+.kg-details dt,
+.kg-muted {
+  color: #4b6178;
+}
+
+.kg-stat,
+.kg-workspace,
+.kg-timeline li,
+.kg-status {
+  border-color: #c5dcf5;
+  background: #f8fbff;
+}
+
+.kg-toolbar input,
+.kg-toolbar select,
+.kg-reset,
+.kg-status button {
+  border-color: #b8d2ef;
+  background: #f5faff;
+  color: #173b63;
+}
+
+.kg-toolbar input:focus,
+.kg-toolbar select:focus,
+.kg-reset:focus-visible,
+.kg-status button:focus-visible {
+  outline: 2px solid #5593d5;
+  outline-offset: 2px;
+}
+
+.kg-reset:hover,
+.kg-status button:hover {
+  border-color: #93bce8;
+  background: #e3f0ff;
+  color: #123457;
+}
+
+.kg-graph-note,
+.kg-chat-label {
+  border-color: #bfd8f3;
+  background: #eaf4ff;
+  color: #234766;
+}
+
+.kg-workspace {
+  border-color: #bfd8f3;
+}
+
+.kg-canvas {
+  background: #eaf4ff;
+}
+
+.kg-details {
+  border-left-color: #c5dcf5;
+  background: #f8fbff;
+}
+
+.kg-query-button {
+  border: 1px solid #91bce8;
+  background: #d6eaff;
+  color: #173b63;
+}
+
+.kg-query-button:hover {
+  background: #c2dfff;
+}
+
+.kg-sql,
+.kg-result-data {
+  border: 1px solid #c5dcf5;
+  background: #edf6ff;
+  color: #17324d;
+}
+
+.kg-empty {
+  color: #4b6178;
+}
+
+.kg-error {
+  color: #a11b1b;
+}
+
+@media (max-width: 900px) {
+  .kg-details {
+    border-top-color: #c5dcf5;
   }
 }

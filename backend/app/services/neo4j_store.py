@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
 import threading
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -35,6 +37,7 @@ class Neo4jStoreError(RuntimeError):
         code: str = "NEO4J_UNAVAILABLE",
         retry_after_seconds: int | None = None,
     ) -> None:
+        """Carry a safe error code and optional retry delay with the failure."""
         super().__init__(message)
         self.code = code
         self.retry_after_seconds = retry_after_seconds
@@ -70,6 +73,7 @@ def graph_store_status() -> str:
 
 
 def _configuration() -> tuple[str, str, str, str] | None:
+    """Validate optional Neo4j settings without exposing secret values."""
     uri = os.getenv("NEO4J_URI", "").strip()
     username = os.getenv("NEO4J_USERNAME", "").strip()
     password = os.getenv("NEO4J_PASSWORD", "")
@@ -175,6 +179,7 @@ def _error_for(exc: Exception) -> Neo4jStoreError:
 
 
 def _get_driver(configuration: tuple[str, str, str, str]) -> Any:
+    """Reuse a driver for unchanged settings and replace it when they change."""
     global _driver, _driver_key, _verified_at
     with _lock:
         if _driver is not None and _driver_key != configuration:
@@ -202,6 +207,7 @@ def _get_driver(configuration: tuple[str, str, str, str]) -> Any:
 def _raise_if_cooling_down(
     configuration: tuple[str, str, str, str],
 ) -> None:
+    """Return the recent sanitized error instead of retrying a known outage."""
     if (
         _failure_key == configuration
         and _last_failure is not None
@@ -216,6 +222,7 @@ def _raise_if_cooling_down(
 
 
 def _record_success() -> None:
+    """Clear the cached failure state after connectivity has been verified."""
     global _failure_until, _last_failure, _failure_key, _verified_at
     with _lock:
         _failure_until = 0.0
@@ -228,6 +235,7 @@ def _record_failure(
     exc: Exception,
     configuration: tuple[str, str, str, str],
 ) -> Neo4jStoreError:
+    """Cache and log a sanitized failure once per cooldown period."""
     global _failure_until, _last_failure, _failure_key, _verified_at
     error = _error_for(exc)
     now = time.monotonic()
@@ -247,6 +255,7 @@ def _record_failure(
 
 
 def _ensure_connected(configuration: tuple[str, str, str, str]) -> Any:
+    """Check Neo4j connectivity at a bounded interval before using the driver."""
     global _verified_at
     with _lock:
         _raise_if_cooling_down(configuration)
@@ -316,6 +325,7 @@ def _graph_rows(
     graph: dict[str, Any],
     scope_id: str,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Validate a graph payload and serialize nodes and edges for Neo4j."""
     nodes: list[dict[str, Any]] = []
     for node in graph.get("nodes", []):
         if not isinstance(node, dict):
@@ -349,6 +359,10 @@ def _graph_rows(
             }
         )
 
+    dataset_by_node_id = {
+        node["id"]: node.get("dataset_id")
+        for node in nodes
+    }
     edges: list[dict[str, Any]] = []
     for edge in graph.get("edges", []):
         if not isinstance(edge, dict):
@@ -375,6 +389,8 @@ def _graph_rows(
                 "scope_id": scope_id,
                 "source_id": source_id,
                 "target_id": target_id,
+                "source_dataset_id": dataset_by_node_id.get(source_id),
+                "target_dataset_id": dataset_by_node_id.get(target_id),
                 "relationship": str(
                     edge.get("type", edge.get("relationship", "RELATED_TO"))
                 ),
@@ -412,6 +428,7 @@ def sync_graph(scope_id: str, graph: dict[str, Any]) -> bool:
             ).consume()
 
             def write_graph(transaction: Any) -> None:
+                """Write one bounded batch of graph nodes and edges transactionally."""
                 for start in range(0, len(nodes), WRITE_BATCH_SIZE):
                     transaction.run(
                         """
@@ -461,7 +478,7 @@ def sync_graph(scope_id: str, graph: dict[str, Any]) -> bool:
                     ).consume()
                 transaction.run(
                     """
-                    MATCH (node:GraphNode {scope_id: $scope_id})
+                    MATCH (node:GraphNode)
                     WHERE NOT node.id IN $node_ids
                     DETACH DELETE node
                     """,
@@ -540,6 +557,375 @@ def get_graph(scope_id: str) -> dict[str, Any]:
     }
 
 
+DATASET_GRAPH_SCOPE = "dataset-knowledge-graph"
+
+
+def _dataset_graph_scope_id(dataset_ids: list[str]) -> str:
+    """Keep full and chat-selected graph projections isolated in Neo4j."""
+    digest = hashlib.sha256(
+        "\x1f".join(sorted(dataset_ids)).encode("utf-8")
+    ).hexdigest()[:20]
+    return f"{DATASET_GRAPH_SCOPE}:{digest}"
+
+
+def replace_dataset_graph(
+    graph: dict[str, Any],
+    dataset_ids: list[str],
+) -> None:
+    """Replace selected dataset graph records in Neo4j without touching others."""
+    configuration = _configuration()
+    if configuration is None:
+        raise Neo4jStoreError(
+            "Neo4j is not configured.",
+            code="NEO4J_NOT_CONFIGURED",
+        )
+    if not isinstance(dataset_ids, list) or any(
+        not isinstance(dataset_id, str) or not dataset_id.strip()
+        for dataset_id in dataset_ids
+    ):
+        raise Neo4jStoreError("Dataset graph IDs must be non-empty strings.")
+    selected_ids = list(dict.fromkeys(item.strip() for item in dataset_ids))
+    if not selected_ids:
+        return
+    if not isinstance(graph, dict):
+        raise Neo4jStoreError("Dataset graph data must be an object.")
+
+    scope_id = _dataset_graph_scope_id(selected_ids)
+    nodes, edges = _graph_rows(graph, scope_id)
+    if any(node.get("dataset_id") not in selected_ids for node in nodes):
+        raise Neo4jStoreError(
+            "A Neo4j graph node is outside the selected dataset scope."
+        )
+    node_ids = {node["id"] for node in nodes}
+    if any(
+        edge["source_id"] not in node_ids or edge["target_id"] not in node_ids
+        or edge["source_dataset_id"] not in selected_ids
+        or edge["target_dataset_id"] not in selected_ids
+        for edge in edges
+    ):
+        raise Neo4jStoreError(
+            "A Neo4j graph edge is outside the selected dataset scope."
+        )
+
+    counts = {
+        dataset_id: {
+            "node_count": sum(
+                node.get("dataset_id") == dataset_id for node in nodes
+            ),
+            "edge_count": sum(
+                edge["source_dataset_id"] == dataset_id for edge in edges
+            ),
+        }
+        for dataset_id in selected_ids
+    }
+    builds = [
+        {
+            "scope_id": DATASET_GRAPH_SCOPE,
+            "dataset_id": dataset_id,
+            "status": "complete",
+            **counts[dataset_id],
+            "built_at": datetime.now(timezone.utc).isoformat(),
+        }
+        for dataset_id in selected_ids
+    ]
+
+    driver = _ensure_connected(configuration)
+    try:
+        with driver.session(database=configuration[3]) as session:
+            session.run(
+                "CREATE CONSTRAINT graph_dataset_build_scope_id IF NOT EXISTS "
+                "FOR (b:GraphBuild) REQUIRE (b.scope_id, b.dataset_id) IS UNIQUE"
+            ).consume()
+
+            def write_graph(transaction: Any) -> None:
+                """Replace only selected dataset nodes and incident relationships."""
+                transaction.run(
+                    """
+                    MATCH (edge:GraphEdge {scope_id: $scope_id})
+                    WHERE edge.source_dataset_id IN $dataset_ids
+                       OR edge.target_dataset_id IN $dataset_ids
+                    DETACH DELETE edge
+                    """,
+                    scope_id=scope_id,
+                    dataset_ids=selected_ids,
+                ).consume()
+                transaction.run(
+                    """
+                    MATCH (node:GraphNode {scope_id: $scope_id})
+                    WHERE node.dataset_id IN $dataset_ids
+                    DETACH DELETE node
+                    """,
+                    scope_id=scope_id,
+                    dataset_ids=selected_ids,
+                ).consume()
+                transaction.run(
+                    """
+                    UNWIND $dataset_ids AS dataset_id
+                    MATCH (build:GraphBuild {
+                        scope_id: $scope_id,
+                        dataset_id: dataset_id
+                    })
+                    DELETE build
+                    """,
+                    scope_id=scope_id,
+                    dataset_ids=selected_ids,
+                ).consume()
+                for start in range(0, len(nodes), WRITE_BATCH_SIZE):
+                    transaction.run(
+                        """
+                        UNWIND $nodes AS row
+                        MERGE (node:GraphNode {scope_id: row.scope_id, id: row.id})
+                        SET node.node_type = row.node_type,
+                            node.label = row.label,
+                            node.created_at = row.created_at,
+                            node.dataset_id = row.dataset_id,
+                            node.properties_json = row.properties_json
+                        """,
+                        nodes=nodes[start:start + WRITE_BATCH_SIZE],
+                    ).consume()
+                for start in range(0, len(edges), WRITE_BATCH_SIZE):
+                    transaction.run(
+                        """
+                        UNWIND $edges AS row
+                        MATCH (source:GraphNode {
+                            scope_id: row.scope_id,
+                            id: row.source_id
+                        })
+                        MATCH (target:GraphNode {
+                            scope_id: row.scope_id,
+                            id: row.target_id
+                        })
+                        MERGE (edge:GraphEdge {scope_id: row.scope_id, id: row.id})
+                        SET edge.relationship = row.relationship,
+                            edge.created_at = row.created_at,
+                            edge.dataset_id = row.source_dataset_id,
+                            edge.source_dataset_id = row.source_dataset_id,
+                            edge.target_dataset_id = row.target_dataset_id,
+                            edge.properties_json = row.properties_json
+                        MERGE (source)-[:SOURCE]->(edge)
+                        MERGE (edge)-[:TARGET]->(target)
+                        """,
+                        edges=edges[start:start + WRITE_BATCH_SIZE],
+                    ).consume()
+                transaction.run(
+                    """
+                    UNWIND $builds AS row
+                    MERGE (build:GraphBuild {
+                        scope_id: row.scope_id,
+                        dataset_id: row.dataset_id
+                    })
+                    SET build.status = row.status,
+                        build.node_count = row.node_count,
+                        build.edge_count = row.edge_count,
+                        build.built_at = row.built_at
+                    """,
+                    builds=builds,
+                ).consume()
+
+            session.execute_write(write_graph)
+    except Neo4jStoreError:
+        raise
+    except Exception as exc:
+        raise _record_failure(exc, configuration) from exc
+    _record_success()
+
+
+def get_dataset_graph(
+    dataset_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    """Read dataset nodes, graph edges, and build markers from Neo4j."""
+    configuration = _configuration()
+    if configuration is None:
+        raise Neo4jStoreError(
+            "Neo4j is not configured.",
+            code="NEO4J_NOT_CONFIGURED",
+        )
+    if dataset_ids is not None and (
+        not isinstance(dataset_ids, list)
+        or any(not isinstance(item, str) or not item.strip() for item in dataset_ids)
+    ):
+        raise Neo4jStoreError("Dataset graph IDs must be non-empty strings.")
+    selected_ids = (
+        list(dict.fromkeys(item.strip() for item in dataset_ids))
+        if dataset_ids is not None
+        else None
+    )
+    scope_id = (
+        _dataset_graph_scope_id(selected_ids)
+        if selected_ids is not None
+        else None
+    )
+    driver = _ensure_connected(configuration)
+    try:
+        with driver.session(database=configuration[3]) as session:
+            node_rows = session.run(
+                """
+                MATCH (node:GraphNode {scope_id: $scope_id})
+                WHERE (
+                    ($scope_id IS NOT NULL AND node.scope_id = $scope_id)
+                    OR (
+                        $scope_id IS NULL
+                        AND node.scope_id STARTS WITH $scope_prefix
+                    )
+                )
+                RETURN node.id AS id, node.node_type AS type,
+                       node.label AS label, node.created_at AS created_at,
+                       node.properties_json AS properties_json
+                ORDER BY node.created_at, node.id
+                """,
+                scope_id=scope_id,
+                scope_prefix=f"{DATASET_GRAPH_SCOPE}:",
+            ).data()
+            edge_rows = session.run(
+                """
+                MATCH (source:GraphNode)
+                      -[:SOURCE]->(edge:GraphEdge)
+                      -[:TARGET]->(target:GraphNode)
+                WHERE edge.scope_id = source.scope_id
+                  AND edge.scope_id = target.scope_id
+                  AND (
+                    ($scope_id IS NOT NULL AND edge.scope_id = $scope_id)
+                    OR (
+                        $scope_id IS NULL
+                        AND edge.scope_id STARTS WITH $scope_prefix
+                    )
+                )
+                RETURN edge.id AS id, source.id AS source,
+                       target.id AS target, edge.relationship AS type,
+                       edge.properties_json AS properties_json
+                ORDER BY edge.created_at, edge.id
+                """,
+                scope_id=scope_id,
+                scope_prefix=f"{DATASET_GRAPH_SCOPE}:",
+            ).data()
+            build_rows = session.run(
+                """
+                MATCH (build:GraphBuild)
+                WHERE (
+                    ($scope_id IS NOT NULL AND build.scope_id = $scope_id)
+                    OR (
+                        $scope_id IS NULL
+                        AND build.scope_id STARTS WITH $scope_prefix
+                    )
+                )
+                RETURN build.dataset_id AS dataset_id,
+                       build.status AS status,
+                       build.node_count AS node_count,
+                       build.edge_count AS edge_count,
+                       build.built_at AS built_at
+                ORDER BY build.dataset_id
+                """,
+                scope_id=scope_id,
+                scope_prefix=f"{DATASET_GRAPH_SCOPE}:",
+            ).data()
+    except Exception as exc:
+        raise _record_failure(exc, configuration) from exc
+    _record_success()
+    output_nodes = []
+    for row in node_rows:
+        node = {
+            **json.loads(row["properties_json"]),
+            "id": row["id"],
+            "type": row["type"],
+            "label": row["label"],
+        }
+        if row["created_at"]:
+            node["created_at"] = row["created_at"]
+        output_nodes.append(node)
+
+    return {
+        "scope_id": scope_id or DATASET_GRAPH_SCOPE,
+        "nodes": output_nodes,
+        "edges": [
+            {
+                **json.loads(row["properties_json"]),
+                "id": row["id"],
+                "source": row["source"],
+                "target": row["target"],
+                "type": row["type"],
+            }
+            for row in edge_rows
+        ],
+        "builds": [
+            {
+                "dataset_id": row["dataset_id"],
+                "status": row["status"],
+                "node_count": row["node_count"],
+                "edge_count": row["edge_count"],
+                "built_at": row["built_at"],
+            }
+            for row in build_rows
+        ],
+    }
+
+
+def delete_dataset_graph(dataset_id: str) -> None:
+    """Delete one dataset and all incident candidate links from the Neo4j graph."""
+    if not isinstance(dataset_id, str) or not dataset_id.strip():
+        raise Neo4jStoreError("Dataset ID must be a non-empty string.")
+    configuration = _configuration()
+    if configuration is None:
+        raise Neo4jStoreError(
+            "Neo4j is not configured.",
+            code="NEO4J_NOT_CONFIGURED",
+        )
+    driver = _ensure_connected(configuration)
+    try:
+        with driver.session(database=configuration[3]) as session:
+            def remove_dataset(transaction: Any) -> None:
+                """Delete graph data and build metadata scoped to one dataset."""
+                scope_result = transaction.run(
+                    """
+                    MATCH (build:GraphBuild {dataset_id: $dataset_id})
+                    WHERE build.scope_id STARTS WITH $scope_prefix
+                    RETURN collect(DISTINCT build.scope_id) AS scope_ids
+                    """,
+                    scope_prefix=f"{DATASET_GRAPH_SCOPE}:",
+                    dataset_id=dataset_id,
+                ).single()
+                scope_ids = (
+                    scope_result.get("scope_ids", [])
+                    if scope_result
+                    else []
+                )
+                if not scope_ids:
+                    return
+                transaction.run(
+                    """
+                    MATCH (edge:GraphEdge)
+                    WHERE edge.scope_id IN $scope_ids
+                    DETACH DELETE edge
+                    """,
+                    scope_ids=scope_ids,
+                    dataset_id=dataset_id,
+                ).consume()
+                transaction.run(
+                    """
+                    MATCH (node:GraphNode)
+                    WHERE node.scope_id IN $scope_ids
+                    DETACH DELETE node
+                    """,
+                    scope_ids=scope_ids,
+                    dataset_id=dataset_id,
+                ).consume()
+                transaction.run(
+                    """
+                    MATCH (build:GraphBuild)
+                    WHERE build.scope_id IN $scope_ids
+                    DELETE build
+                    """,
+                    scope_ids=scope_ids,
+                    dataset_id=dataset_id,
+                ).consume()
+
+            session.execute_write(remove_dataset)
+    except Neo4jStoreError:
+        raise
+    except Exception as exc:
+        raise _record_failure(exc, configuration) from exc
+    _record_success()
+
+
 def delete_graphs(scope_ids: list[str]) -> None:
     """Delete graph scopes in one Neo4j transaction."""
     configuration = _configuration()
@@ -553,6 +939,7 @@ def delete_graphs(scope_ids: list[str]) -> None:
     try:
         with driver.session(database=configuration[3]) as session:
             def remove_scopes(transaction: Any) -> None:
+                """Delete graph records only for the requested scopes."""
                 transaction.run(
                     """
                     UNWIND $scope_ids AS scope_id

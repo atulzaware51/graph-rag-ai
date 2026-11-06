@@ -9,6 +9,7 @@ def neo4j_unavailable_response(
     *,
     status_code: int = 503,
 ) -> JSONResponse:
+    """Format a credential-safe Neo4j error and preserve retry guidance for clients."""
     code = getattr(error, "code", "NEO4J_UNAVAILABLE")
     retry_after_seconds = getattr(error, "retry_after_seconds", None)
     headers = {}

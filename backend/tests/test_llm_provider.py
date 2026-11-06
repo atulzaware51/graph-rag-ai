@@ -44,7 +44,7 @@ def test_falls_back_to_groq_after_bounded_gemini_retries(monkeypatch):
 
     assert text == "Generated from Groq."
     assert provider == "groq"
-    assert calls == ["gemini"] * 3 + ["groq"]
+    assert calls == ["gemini"] * llm_provider.MAX_ATTEMPTS_PER_PROVIDER + ["groq"]
 
 
 def test_provider_order_is_configurable_and_missing_keys_are_skipped(monkeypatch):
@@ -63,6 +63,30 @@ def test_provider_order_is_configurable_and_missing_keys_are_skipped(monkeypatch
     assert text == "answer"
     assert provider == "gemini"
     assert calls == ["gemini"]
+
+
+def test_provider_settings_trim_matching_quotes(monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", '"groq"')
+    monkeypatch.setenv("GROQ_API_KEY", '"groq-test-key"')
+    monkeypatch.setenv("GROQ_MODEL", "'llama-test'")
+    calls = []
+    monkeypatch.setattr(
+        llm_provider,
+        "_call_provider",
+        lambda provider, api_key, model, *_args: (
+            calls.append((provider, api_key, model)) or "answer"
+        ),
+    )
+
+    assert generate_text(user_prompt="Question") == ("answer", "groq")
+    assert calls == [("groq", "groq-test-key", "llama-test")]
+
+
+def test_placeholder_key_is_treated_as_missing(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "your_gemini_api_key_here")
+    with pytest.raises(LLMProviderError) as error:
+        generate_text(user_prompt="Question")
+    assert error.value.code == "LLM_PROVIDER_NOT_CONFIGURED"
 
 
 def test_all_provider_failures_are_reported_without_secrets(monkeypatch):
@@ -119,6 +143,80 @@ def test_gemini_sdk_statuses_are_classified_for_failover(
 
     assert failure.code == expected_code
     assert failure.retryable is retryable
+
+
+def test_gemini_quota_exhaustion_is_distinct_from_rate_limit():
+    failure = _classify_provider_error(
+        genai_errors.ClientError(
+            429,
+            {"error": {"status": "RESOURCE_EXHAUSTED", "message": "quota exceeded"}},
+        )
+    )
+
+    assert failure.code == "QUOTA_EXHAUSTED"
+    assert not failure.retryable
+
+
+def test_retry_after_is_bounded_and_respected(monkeypatch):
+    monkeypatch.setenv("GROQ_API_KEY", "groq-test-key")
+    delays = []
+    calls = []
+
+    class FakeResponse:
+        status_code = 429
+        headers = {"Retry-After": "30"}
+
+        def json(self):
+            return {"error": {"message": "rate limit"}}
+
+    def fake_post(*_args, **_kwargs):
+        calls.append(1)
+        if len(calls) == 1:
+            return FakeResponse()
+        return type(
+            "SuccessResponse",
+            (),
+            {
+                "status_code": 200,
+                "json": lambda _self: {
+                    "choices": [{"message": {"content": "answer"}}]
+                },
+            },
+        )()
+
+    monkeypatch.setattr(llm_provider.httpx, "post", fake_post)
+    monkeypatch.setattr(llm_provider.time, "sleep", delays.append)
+
+    assert generate_text(user_prompt="Question") == ("answer", "groq")
+    assert delays == [llm_provider.MAX_RETRY_AFTER_SECONDS]
+
+
+def test_provider_diagnostics_never_include_api_keys(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "do-not-return-this-key")
+
+    diagnostics = llm_provider.provider_diagnostics()
+
+    assert diagnostics == [
+        {
+            "provider": "gemini",
+            "model": "gemini-2.5-flash",
+            "configured": True,
+            "status": "configured",
+        },
+        {
+            "provider": "groq",
+            "model": "llama-3.3-70b-versatile",
+            "configured": False,
+            "status": "missing_api_key",
+        },
+        {
+            "provider": "mistral",
+            "model": "mistral-small-latest",
+            "configured": False,
+            "status": "missing_api_key",
+        },
+    ]
+    assert "do-not-return-this-key" not in str(diagnostics)
 
 
 @pytest.mark.parametrize(

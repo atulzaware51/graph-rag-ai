@@ -7,6 +7,7 @@ import xlwt
 
 from backend.app.services.ingestion import (
     IngestionError,
+    get_spreadsheet_sheet_names,
     inspect_spreadsheet,
 )
 
@@ -46,6 +47,34 @@ def test_inspect_excel_returns_metadata(tmp_path):
     assert result["row_count"] == 2
     assert result["column_count"] == 2
     assert result["file_type"] == "xlsx"
+    assert result["sheet_name"] == "Sheet1"
+
+
+def test_inspect_all_workbook_sheets(tmp_path):
+    excel_path = tmp_path / "workbook.xlsx"
+    workbook = pd.ExcelWriter(excel_path, engine="openpyxl")
+    pd.DataFrame({"product": ["Laptop"]}).to_excel(
+        workbook,
+        sheet_name="Products",
+        index=False,
+    )
+    pd.DataFrame({"department": ["Sales"]}).to_excel(
+        workbook,
+        sheet_name="Employees",
+        index=False,
+    )
+    workbook.close()
+
+    sheet_names = get_spreadsheet_sheet_names(excel_path, "workbook.xlsx")
+    inspected = [
+        inspect_spreadsheet(excel_path, "workbook.xlsx", name)
+        for name in sheet_names
+    ]
+
+    assert sheet_names == ["Products", "Employees"]
+    assert [sheet["sheet_name"] for sheet in inspected] == sheet_names
+    assert inspected[0]["preview"][0]["product"] == "Laptop"
+    assert inspected[1]["preview"][0]["department"] == "Sales"
 
 
 def test_inspect_legacy_xls_returns_metadata(tmp_path):

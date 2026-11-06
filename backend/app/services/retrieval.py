@@ -12,6 +12,10 @@ from backend.app.services.dataset_store import (
     DatasetStorageError,
     get_dataset_chunks,
 )
+from backend.app.services.vector_store import (
+    VectorStoreError,
+    search_similar_chunks,
+)
 
 
 class RetrievalError(ValueError):
@@ -130,11 +134,67 @@ def retrieve_chunks(
         )
     )
 
-    # Remove the internal sorting field from the public results.
+    vector_results = []
+    if Path(database_path).is_file():
+        try:
+            vector_results = search_similar_chunks(
+                query,
+                [dataset_id],
+                top_k=max(top_k, 5),
+                database_path=database_path,
+            )
+        except VectorStoreError as exc:
+            raise RetrievalError(
+                f"Could not search the local vector index: {exc}"
+            ) from exc
+
+    max_keyword_score = max(
+        (result["score"] for result in ranked_results),
+        default=0,
+    )
+    results_by_id = {result["chunk_id"]: result for result in ranked_results}
+    for vector_rank, vector_chunk in enumerate(vector_results, start=1):
+        result = results_by_id.get(vector_chunk["chunk_id"])
+        if result is None:
+            result = {
+                **vector_chunk,
+                "score": 0,
+                "matched_terms": [],
+                "_original_position": vector_chunk["chunk_index"],
+            }
+            results_by_id[result["chunk_id"]] = result
+        keyword_score = (
+            result["score"] / max_keyword_score
+            if max_keyword_score
+            else 0
+        )
+        vector_score = max(
+            0.0,
+            min(1.0, (vector_chunk["vector_similarity"] + 1.0) / 2.0),
+        )
+        result["vector_similarity"] = vector_chunk["vector_similarity"]
+        result["_hybrid_score"] = 0.45 * keyword_score + 0.55 * vector_score
+        result["_vector_rank"] = vector_rank
+
+    ranked_results = list(results_by_id.values())
+    if vector_results:
+        ranked_results.sort(
+            key=lambda result: (
+                -result.get("_hybrid_score", 0.45 * (
+                    result["score"] / max_keyword_score
+                    if max_keyword_score
+                    else 0
+                )),
+                result["_original_position"],
+            )
+        )
+
     results = ranked_results[:top_k]
 
     for result in results:
         result.pop("_original_position", None)
+        result.pop("_hybrid_score", None)
+        result.pop("_vector_rank", None)
 
     return results
 
@@ -213,23 +273,63 @@ def retrieve_chunks_for_datasets(
                     column
                 )
 
+    vector_results = []
+    if Path(database_path).is_file():
+        try:
+            vector_results = search_similar_chunks(
+                query,
+                unique_ids,
+                top_k=max(top_k * 3, 10),
+                database_path=database_path,
+            )
+        except VectorStoreError as exc:
+            raise RetrievalError(
+                f"Could not search the local vector index: {exc}"
+            ) from exc
+    vector_chunks_by_dataset: dict[str, list[dict[str, Any]]] = {}
+    for vector_chunk in vector_results:
+        vector_chunks_by_dataset.setdefault(
+            vector_chunk["dataset_id"],
+            [],
+        ).append(vector_chunk)
+
     ranked: list[tuple[int, int, dict[str, Any]]] = []
     for position, dataset_id in enumerate(unique_ids):
-        chunks = graph_chunks_by_dataset.get(dataset_id)
-        if chunks is None:
-            try:
-                chunks = get_dataset_chunks(
-                    dataset_id=dataset_id,
-                    database_path=database_path,
-                )
-            except DatasetStorageError:
+        try:
+            chunks = get_dataset_chunks(
+                dataset_id=dataset_id,
+                database_path=database_path,
+            )
+        except DatasetStorageError:
+            chunks = graph_chunks_by_dataset.get(dataset_id)
+            if chunks is None:
                 raise
-            except Exception as exc:
+        except Exception as exc:
+            chunks = graph_chunks_by_dataset.get(dataset_id)
+            if chunks is None:
                 raise RetrievalError(
                     f"Could not retrieve chunks for dataset {dataset_id!r}."
                 ) from exc
 
+        known_chunk_ids = {
+            chunk.get("chunk_id")
+            for chunk in chunks
+            if isinstance(chunk, dict)
+        }
+        for graph_chunk in graph_chunks_by_dataset.get(dataset_id, []):
+            if graph_chunk["chunk_id"] not in known_chunk_ids:
+                chunks.append(graph_chunk)
+                known_chunk_ids.add(graph_chunk["chunk_id"])
+        for vector_chunk in vector_chunks_by_dataset.get(dataset_id, []):
+            if vector_chunk["chunk_id"] not in known_chunk_ids:
+                chunks.append(vector_chunk)
+                known_chunk_ids.add(vector_chunk["chunk_id"])
+
         graph_columns = anchors_by_dataset.get(dataset_id, [])
+        vector_by_id = {
+            chunk["chunk_id"]: chunk
+            for chunk in vector_chunks_by_dataset.get(dataset_id, [])
+        }
         for original_position, chunk in enumerate(chunks):
             chunk_text = chunk.get("text", "")
             if not isinstance(chunk_text, str) or not chunk_text.strip():
@@ -268,7 +368,8 @@ def retrieve_chunks_for_datasets(
                         }
                     )
 
-            if not matched_terms and not graph_matches:
+            vector_chunk = vector_by_id.get(chunk["chunk_id"])
+            if not matched_terms and not graph_matches and vector_chunk is None:
                 continue
 
             ranked_result = {
@@ -284,6 +385,10 @@ def retrieve_chunks_for_datasets(
                 "_dataset_position": position,
                 "_original_position": original_position,
             }
+            if vector_chunk:
+                ranked_result["vector_similarity"] = vector_chunk[
+                    "vector_similarity"
+                ]
             ranked.append(
                 (
                     position,
@@ -294,7 +399,32 @@ def retrieve_chunks_for_datasets(
 
     ranked.sort(
         key=lambda item: (
-            -item[2]["score"],
+            -(
+                0.45 * (
+                    item[2]["score"]
+                    / max(
+                        (
+                            candidate[2]["score"]
+                            for candidate in ranked
+                        ),
+                        default=1,
+                    )
+                )
+                + 0.55
+                * max(
+                    0.0,
+                    min(
+                        1.0,
+                        (
+                            item[2].get("vector_similarity", -1.0)
+                            + 1.0
+                        )
+                        / 2.0,
+                    ),
+                )
+                if vector_results
+                else item[2]["score"]
+            ),
             item[0],
             item[2]["chunk_index"],
             item[1],
@@ -400,6 +530,7 @@ def build_graph_retrieval_context(
     ]
 
     def column_summary(column: dict[str, Any]) -> dict[str, Any]:
+        """Omit sample values to keep graph context compact and avoid needless disclosure."""
         return {
             key: value
             for key, value in column.items()

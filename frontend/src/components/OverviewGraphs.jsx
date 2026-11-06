@@ -1,3 +1,4 @@
+// Show one compact dataset-and-column graph card per uploaded sheet.
 import { useEffect, useMemo, useState } from 'react'
 import ForceGraph2D from 'react-force-graph-2d'
 import { getKnowledgeGraph } from '../services/api'
@@ -5,10 +6,12 @@ import useElementWidth from '../hooks/useElementWidth'
 import './OverviewGraphs.css'
 
 function getEndpointId(endpoint) {
+  // Graph APIs may return edge endpoints as IDs or expanded node objects.
   return typeof endpoint === 'object' ? endpoint?.id : endpoint
 }
 
 function DatasetGraph({ dataset, graph }) {
+  // Restrict the shared graph payload to this sheet before rendering its overview.
   const [graphCanvasRef, graphCanvasWidth] = useElementWidth()
   const datasetGraph = useMemo(() => {
     const nodes = graph.nodes.filter(
@@ -66,26 +69,26 @@ function DatasetGraph({ dataset, graph }) {
             width={graphCanvasWidth}
             height={220}
             nodeRelSize={6}
-            nodeColor={(node) => node.type === 'Dataset' ? '#60a5fa' : '#34d399'}
+            nodeColor={(node) => node.type === 'Dataset' ? '#3b82f6' : '#059669'}
             nodeCanvasObject={(node, context, globalScale) => {
               const isDataset = node.type === 'Dataset'
               const radius = isDataset ? 8 : 5
 
               context.beginPath()
               context.arc(node.x, node.y, radius, 0, 2 * Math.PI)
-              context.fillStyle = isDataset ? '#60a5fa' : '#34d399'
+              context.fillStyle = isDataset ? '#3b82f6' : '#059669'
               context.fill()
               context.font = `${isDataset ? '600 ' : ''}${11 / globalScale}px sans-serif`
               context.textAlign = 'left'
               context.textBaseline = 'middle'
-              context.fillStyle = '#e2e8f0'
+              context.fillStyle = '#17324d'
               context.fillText(
                 String(node.label ?? node.id),
                 node.x + radius + 3,
                 node.y,
               )
             }}
-            linkColor={() => '#475569'}
+            linkColor={() => '#8aa8c8'}
             linkWidth={1.2}
             cooldownTicks={60}
             enableNodeDrag={false}
@@ -105,6 +108,7 @@ function DatasetGraph({ dataset, graph }) {
 }
 
 export default function OverviewGraphs({ datasets }) {
+  // Load the dataset graph once and let each card display its own subgraph.
   const [graph, setGraph] = useState({ nodes: [], edges: [] })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')

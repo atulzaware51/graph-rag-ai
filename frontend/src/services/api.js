@@ -1,12 +1,14 @@
-// ```javascript
+// Centralize HTTP handling and endpoint helpers used by the React workspace.
 const API_BASE_URL = ''
 
 async function request(endpoint, options = {}) {
+  // Normalize network, response-format, and API errors for the UI.
   let response
 
   try {
     response = await fetch(`${API_BASE_URL}${endpoint}`, options)
-  } catch {
+  } catch (error) {
+    if (error?.name === 'AbortError') throw error
     throw new Error(
       'Cannot connect to the API. Check that FastAPI is running on port 8001.',
     )
@@ -20,7 +22,8 @@ async function request(endpoint, options = {}) {
     data = contentType.includes('application/json')
       ? await response.json()
       : await response.text()
-  } catch {
+  } catch (error) {
+    if (error?.name === 'AbortError') throw error
     throw new Error('The server returned an invalid response.')
   }
 
@@ -29,16 +32,37 @@ async function request(endpoint, options = {}) {
       typeof data === 'object' && data !== null
         ? data.detail || data.message
         : data
+    const errorCode = (
+      typeof rawDetail === 'object' && rawDetail !== null
+        ? rawDetail.code
+        : undefined
+    )
     const detail =
       typeof rawDetail === 'object' && rawDetail !== null
         ? rawDetail.message || rawDetail.code
         : rawDetail
 
-    throw new Error(
-      detail
-        ? String(detail)
-        : `Request failed: HTTP ${response.status}`,
+    const friendlyMessages = {
+      LLM_PROVIDER_NOT_CONFIGURED:
+        'Provider configuration error: no usable LLM API key is configured.',
+      LLM_PROVIDER_CONFIGURATION_INVALID:
+        'Provider configuration error: the selected provider settings are invalid.',
+      AUTHENTICATION_FAILED:
+        'Provider authentication error: the configured API key was rejected.',
+      RATE_LIMITED:
+        'Provider rate limit: requests are temporarily limited. Please try again shortly.',
+      GRAPH_RETRIEVAL_FAILED:
+        'Knowledge Graph unavailable. Chunk-based retrieval may still be used.',
+    }
+    const error = new Error(
+      friendlyMessages[errorCode] || (
+        detail
+          ? String(detail)
+          : `Request failed: HTTP ${response.status}`
+      ),
     )
+    error.code = errorCode
+    throw error
   }
 
   return data
@@ -51,6 +75,7 @@ export function checkHealth() {
 
 // Retrieve the available datasets.
 export async function getDatasets() {
+  // Validate the collection shape before components consume the dataset list.
   const data = await request('/datasets/')
 
   if (!data || !Array.isArray(data.datasets)) {
@@ -61,6 +86,7 @@ export async function getDatasets() {
 }
 
 export async function getConversations() {
+  // Fetch conversation summaries for the chat selector.
   const data = await request('/conversations/')
   if (!data || !Array.isArray(data.conversations)) {
     throw new Error('Unexpected response from the conversations API.')
@@ -69,6 +95,7 @@ export async function getConversations() {
 }
 
 export async function getConversation(conversationId) {
+  // Load a conversation's events so the UI can reconstruct its messages and results.
   const data = await request(
     `/conversations/${encodeURIComponent(conversationId)}`,
   )
@@ -79,6 +106,7 @@ export async function getConversation(conversationId) {
 }
 
 export async function createConversation(title = 'New chat', conversationId) {
+  // Create a persistent conversation, optionally preserving a legacy client ID.
   const data = await request('/conversations/', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -94,6 +122,7 @@ export async function createConversation(title = 'New chat', conversationId) {
 }
 
 export function deleteConversation(conversationId) {
+  // Delete server-side conversation history for the selected chat.
   return request(
     `/conversations/${encodeURIComponent(conversationId)}`,
     { method: 'DELETE' },
@@ -101,6 +130,7 @@ export function deleteConversation(conversationId) {
 }
 
 export function addConversationMessage(conversationId, actor, message, metadata = {}) {
+  // Append a user or assistant message with structured metadata.
   return request(
     `/conversations/${encodeURIComponent(conversationId)}/messages`,
     {
@@ -112,6 +142,7 @@ export function addConversationMessage(conversationId, actor, message, metadata 
 }
 
 export function addConversationEvent(conversationId, eventType, message, metadata = {}) {
+  // Save non-message events such as uploads and SQL result references.
   return request(
     `/conversations/${encodeURIComponent(conversationId)}/events`,
     {
@@ -127,6 +158,7 @@ export function addConversationEvent(conversationId, eventType, message, metadat
 }
 
 export async function getConversationGraph(conversationId) {
+  // Fetch and normalize graph node types for the chat graph visualizer.
   const data = await request(
     `/conversations/${encodeURIComponent(conversationId)}/graph`,
   )
@@ -153,6 +185,7 @@ export async function getConversationGraph(conversationId) {
 }
 
 export function updateConversationDatasets(conversationId, datasetIds) {
+  // Persist which sheets are allowed as context for this conversation.
   return request(
     `/conversations/${encodeURIComponent(conversationId)}/datasets`,
     {
@@ -168,7 +201,9 @@ export function askConversation(
   query,
   topK = 5,
   requestId = crypto.randomUUID(),
+  signal,
 ) {
+  // Ask the chat-scoped RAG endpoint to answer from selected-sheet evidence.
   if (!conversationId) {
     throw new Error('Create a chat before asking a question.')
   }
@@ -185,11 +220,13 @@ export function askConversation(
         top_k: topK,
         request_id: requestId,
       }),
+      signal,
     },
   )
 }
 
 export function askConversationSQL(conversationId, question) {
+  // Request one SQL-backed answer scoped to the chat's selected sheets.
   if (!conversationId) {
     throw new Error('Create a chat before running SQL analysis.')
   }
@@ -203,6 +240,61 @@ export function askConversationSQL(conversationId, question) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ question: question.trim() }),
     },
+  )
+}
+
+export async function analyzeConversationSQL(
+  conversationId,
+  question,
+  requestId = crypto.randomUUID(),
+  mode = 'analysis',
+  signal,
+) {
+  // Request multi-query SQL analysis or code generation and validate the response.
+  if (!conversationId) {
+    throw new Error('Create a chat before generating an analysis.')
+  }
+  if (!question || !question.trim()) {
+    throw new Error('Enter a question before submitting.')
+  }
+  const data = await request(
+    `/conversations/${encodeURIComponent(conversationId)}/sql-analysis`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        question: question.trim(),
+        request_id: requestId,
+        mode,
+      }),
+      signal,
+    },
+  )
+  if (!data?.analysis || !Array.isArray(data.analysis.queries)) {
+    throw new Error('The server returned an invalid SQL analysis plan.')
+  }
+  return data
+}
+
+export async function getConversationSQLRelationships(conversationId) {
+  // Load possible cross-sheet joins and their current approval status.
+  const data = await request(
+    `/conversations/${encodeURIComponent(conversationId)}/sql-relationships`,
+  )
+  if (!Array.isArray(data?.relationships)) {
+    throw new Error('Unexpected response from SQL relationship analysis.')
+  }
+  return data.relationships
+}
+
+export function approveConversationSQLRelationship(
+  conversationId,
+  relationshipId,
+) {
+  // Record explicit user approval before a generated query can use the join.
+  return request(
+    `/conversations/${encodeURIComponent(conversationId)}/sql-relationships/${encodeURIComponent(relationshipId)}/approval`,
+    { method: 'POST' },
   )
 }
 
@@ -233,6 +325,7 @@ export function getDatasetPreview(datasetId) {
 }
 
 export async function searchDataset(datasetId, query, topK = 5) {
+  // Find relevant chunks for a sheet and return only a validated result list.
   if (!datasetId) {
     throw new Error('Select a dataset before viewing its evidence.')
   }

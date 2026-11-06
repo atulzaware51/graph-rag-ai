@@ -43,6 +43,7 @@ class ConversationStoreError(RuntimeError):
         code: str | None = None,
         retry_after_seconds: int | None = None,
     ) -> None:
+        """Attach stable API error metadata to conversation storage failures."""
         super().__init__(message)
         self.code = code
         self.retry_after_seconds = retry_after_seconds
@@ -110,6 +111,7 @@ def _retry_locked_writes(
     """Retry a complete, rolled-back write only when SQLite reports lock contention."""
     @wraps(function)
     def wrapped(*args: Any, **kwargs: Any) -> _WriteResult:
+        """Retry full write transactions only for transient SQLite lock errors."""
         for attempt in range(SQLITE_WRITE_RETRIES + 1):
             try:
                 return function(*args, **kwargs)
@@ -326,6 +328,7 @@ def _upsert_graph_node(
     properties: dict[str, Any],
     created_at: str,
 ) -> None:
+    """Insert or refresh one node in the graph projection of a conversation."""
     connection.execute(
         """
         INSERT INTO conversation_graph_nodes (
@@ -357,6 +360,7 @@ def _upsert_graph_edge(
     properties: dict[str, Any] | None = None,
     created_at: str,
 ) -> None:
+    """Insert or refresh a typed edge while keeping its graph identity stable."""
     connection.execute(
         """
         INSERT INTO conversation_graph_edges (
@@ -384,6 +388,7 @@ def _ensure_chat_graph_node(
     title: str,
     timestamp: str,
 ) -> None:
+    """Ensure every conversation has a root node for its event graph."""
     _upsert_graph_node(
         connection,
         node_id=f"chat:{conversation_id}",
@@ -404,6 +409,7 @@ def _write_selected_datasets(
     dataset_ids: list[str],
     timestamp: str,
 ) -> None:
+    """Replace chat-to-dataset edges so graph context matches current selections."""
     chat_node_id = f"chat:{conversation_id}"
     connection.execute(
         """

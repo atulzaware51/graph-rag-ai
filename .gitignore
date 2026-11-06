@@ -27,3 +27,7 @@ Thumbs.db
 *.sqlite
 *.sqlite3
 data/uploads/
+data/chroma/
+
+*.db-shm
+*.db-wal

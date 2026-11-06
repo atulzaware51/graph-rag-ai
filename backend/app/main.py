@@ -1,3 +1,5 @@
+"""Assemble the FastAPI application, expose API routes, and serve the frontend."""
+
 # Import the main FastAPI class to construct the web application
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -75,6 +77,7 @@ app.include_router(conversations_router)
 @app.get("/")
 # Define the root endpoint handler returning basic application status and version info
 def root():
+    """Return a lightweight status payload for the API root."""
     return {
         "message": "GraphSheet AI API is running",
         "status": "success",
@@ -86,6 +89,7 @@ def root():
 @app.get("/health")
 # Define the health check handler used by orchestrators (e.g., Docker, Kubernetes) to verify service availability
 def health_check():
+    """Expose dependency readiness details for local and deployment checks."""
     return {
         "status": "healthy",
         "service": "GraphSheet AI API",

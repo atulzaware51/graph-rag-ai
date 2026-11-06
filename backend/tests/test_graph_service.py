@@ -155,6 +155,47 @@ def test_graph_can_be_scoped_and_include_chunk_evidence(tmp_path):
     )
 
 
+def test_unchanged_complete_graph_is_not_rewritten(tmp_path, monkeypatch):
+    source = tmp_path / "stable.csv"
+    source.write_text("Product,Sales\nKeyboard,12\n", encoding="utf-8")
+    database = tmp_path / "stable.db"
+    stored = store_spreadsheet(
+        source,
+        "stable.csv",
+        database,
+        chunks=[
+            {
+                "chunk_id": "chunk-1",
+                "text": "Product: Keyboard\nSales: 12",
+                "metadata": {"source_rows": [1]},
+            }
+        ],
+    )
+    original_replace = graph_service.replace_graph
+    replacements = []
+
+    def track_replace(*args, **kwargs):
+        replacements.append(1)
+        return original_replace(*args, **kwargs)
+
+    monkeypatch.setattr(graph_service, "replace_graph", track_replace)
+
+    first = build_graph_from_database(
+        database,
+        dataset_ids=[stored["dataset_id"]],
+        include_evidence=True,
+    )
+    second = build_graph_from_database(
+        database,
+        dataset_ids=[stored["dataset_id"]],
+        include_evidence=True,
+    )
+
+    assert first["nodes"] == second["nodes"]
+    assert first["edges"] == second["edges"]
+    assert len(replacements) == 1
+
+
 def test_graph_rejects_missing_selected_dataset(tmp_path):
     source = tmp_path / "present.csv"
     source.write_text("value\n1\n", encoding="utf-8")
@@ -341,3 +382,64 @@ def test_scoped_empty_graph_does_not_require_neo4j(
     assert graph["nodes"] == []
     assert graph["edges"] == []
     assert graph["candidate_relationships"] == []
+
+
+def test_configured_neo4j_is_used_for_dataset_knowledge_graph(
+    tmp_path,
+    monkeypatch,
+):
+    source = tmp_path / "neo4j-graph.csv"
+    source.write_text("Product,Sales\nLamp,10\n", encoding="utf-8")
+    database = tmp_path / "neo4j-graph.db"
+    stored = store_spreadsheet(source, "neo4j-graph.csv", database)
+    persisted = {}
+    writes = []
+
+    def read_graph(dataset_ids):
+        if not persisted:
+            return {"nodes": [], "edges": [], "builds": []}
+        graph = persisted["graph"]
+        return {
+            **graph,
+            "builds": [
+                {
+                    "dataset_id": dataset_id,
+                    "status": "complete",
+                    "node_count": sum(
+                        node.get("dataset_id") == dataset_id
+                        for node in graph["nodes"]
+                    ),
+                    "edge_count": len(graph["edges"]),
+                }
+                for dataset_id in dataset_ids
+            ],
+        }
+
+    def write_graph(graph, dataset_ids):
+        writes.append(list(dataset_ids))
+        persisted["graph"] = graph
+
+    monkeypatch.setattr(graph_service.neo4j_store, "is_configured", lambda: True)
+    monkeypatch.setattr(
+        graph_service.neo4j_store,
+        "get_dataset_graph",
+        read_graph,
+    )
+    monkeypatch.setattr(
+        graph_service.neo4j_store,
+        "replace_dataset_graph",
+        write_graph,
+    )
+    monkeypatch.setattr(
+        graph_service,
+        "replace_graph",
+        lambda *_args, **_kwargs: pytest.fail(
+            "Neo4j configuration should not write the SQL graph store."
+        ),
+    )
+
+    result = build_graph_from_database(database, [stored["dataset_id"]])
+
+    assert result["graph_store"] == "neo4j"
+    assert result["node_count"] > 0
+    assert writes == [[stored["dataset_id"]]]

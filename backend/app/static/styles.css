@@ -1,3 +1,4 @@
+/* Define the visual theme and responsive layout for FastAPI's standalone web page. */
 :root {
   color-scheme: light;
   --ink: #17243a;
@@ -30,6 +31,7 @@ textarea {
   font: inherit;
 }
 
+/* Keep product identity and API documentation links visible at the page top. */
 .site-header {
   height: 72px;
   padding: 0 max(24px, calc((100vw - 1180px) / 2));
@@ -142,6 +144,7 @@ h2 {
   box-shadow: var(--shadow);
 }
 
+/* Present upload controls as the first action in the standalone workspace. */
 .upload-panel {
   display: flex;
   align-items: center;
@@ -242,6 +245,7 @@ h2 {
   background: #f9faff;
 }
 
+/* Align dataset selectors with the preview and schema panels below. */
 .section-heading,
 .panel-heading {
   display: flex;
@@ -288,14 +292,6 @@ select {
 
 .content-grid > .panel {
   min-height: 230px;
-}
-
-.question-grid {
-  margin-top: 16px;
-}
-
-.question-grid > .panel {
-  min-height: 420px;
 }
 
 .panel-heading {
@@ -395,6 +391,168 @@ tr:last-child td {
   justify-items: start;
   gap: 9px;
   margin: 18px 0 14px;
+}
+
+/* Give the multi-sheet Analyst controls and conversation a distinct workspace. */
+.analyst-panel {
+  margin-top: 16px;
+}
+
+.analyst-dataset-picker {
+  margin: 0 0 16px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.analyst-dataset-picker legend {
+  padding: 0 5px;
+  color: #52637d;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.analyst-dataset-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.analyst-dataset-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fcfdff;
+  color: var(--ink);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.analyst-dataset-option input {
+  margin: 0;
+  accent-color: var(--blue);
+}
+
+.analyst-dataset-option small {
+  color: var(--muted);
+}
+
+.analyst-history {
+  display: grid;
+  gap: 12px;
+  max-height: 620px;
+  overflow: auto;
+  padding: 2px 4px 2px 0;
+}
+
+.analyst-message {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #fbfcfe;
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.analyst-message.user {
+  margin-left: 8%;
+  border-color: #d7e2ff;
+  background: var(--soft-blue);
+}
+
+.analyst-message > strong {
+  display: block;
+  margin-bottom: 5px;
+  color: #52637d;
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.analyst-message > p {
+  margin-bottom: 0;
+  white-space: pre-wrap;
+}
+
+.analyst-message.error,
+.analyst-error {
+  color: #9b332d;
+}
+
+.analyst-query {
+  margin-top: 11px;
+  padding: 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+}
+
+.analyst-query h3,
+.analyst-relationship-list h3 {
+  margin: 0 0 7px;
+  font-size: 13px;
+}
+
+.analyst-query > p {
+  margin: 6px 0;
+}
+
+.analyst-query-status {
+  color: #176443;
+  font-size: 10px;
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.analyst-query-status.failed,
+.analyst-query-status.needs_clarification {
+  color: #9b332d;
+}
+
+.analyst-query details {
+  margin: 8px 0;
+}
+
+.analyst-query summary {
+  color: var(--blue);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.analyst-clarification {
+  margin: 8px 0;
+  padding: 9px;
+  border-radius: 7px;
+  color: #7a5411;
+  background: #fff8e6;
+}
+
+.analyst-relationship-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.analyst-relationship {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: white;
+  font-size: 11px;
+}
+
+.analyst-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .question-form label {
@@ -502,6 +660,7 @@ a:focus-visible,
   text-align: right;
 }
 
+/* Separate relationship exploration from spreadsheet previews and chat. */
 .graph-panel {
   margin-top: 16px;
 }
@@ -562,6 +721,7 @@ a:focus-visible,
   border: 0;
 }
 
+/* Collapse paired panels and controls for tablet and phone layouts. */
 @media (max-width: 850px) {
   .upload-panel {
     align-items: flex-start;
@@ -580,9 +740,6 @@ a:focus-visible,
     grid-template-columns: 1fr;
   }
 
-  .question-grid > .panel {
-    min-height: 0;
-  }
 }
 
 @media (max-width: 560px) {
@@ -613,6 +770,15 @@ a:focus-visible,
   .dataset-controls select {
     min-width: 0;
     flex: 1;
+  }
+
+  .analyst-message.user {
+    margin-left: 3%;
+  }
+
+  .analyst-relationship {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .graph-list {

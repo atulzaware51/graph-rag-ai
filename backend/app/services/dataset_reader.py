@@ -1,3 +1,5 @@
+"""Read uploaded dataset metadata, previews, and rows from SQLite."""
+
 # Import sqlite3 module to interact with SQLite databases
 import sqlite3
 # Import Path class from pathlib to work with file paths across different operating systems
@@ -47,7 +49,7 @@ def list_datasets(
                            row_count, column_count, created_at,
                            upload_status, parsing_status, storage_status,
                            chunk_status, graph_build_status, graph_updated_at,
-                           graph_error
+                           graph_error, sheet_name, embedding_status
                     FROM datasets
                     ORDER BY created_at DESC
                     """
@@ -72,6 +74,7 @@ def list_datasets(
                 payload.setdefault("graph_build_status", "pending")
                 payload.setdefault("graph_updated_at", None)
                 payload.setdefault("graph_error", None)
+                payload.setdefault("embedding_status", "pending")
                 payload["graph_status"] = payload.get("graph_build_status", "pending")
                 payload["graph_available"] = payload.get("graph_build_status") == "complete"
                 datasets.append(payload)
@@ -112,7 +115,7 @@ def get_dataset_details(
                            row_count, column_count, created_at,
                            upload_status, parsing_status, storage_status,
                            chunk_status, graph_build_status, graph_updated_at,
-                           graph_error
+                           graph_error, sheet_name, embedding_status
                     FROM datasets
                     WHERE dataset_id = ?
                     """,
@@ -157,6 +160,7 @@ def get_dataset_details(
         result.setdefault("graph_build_status", "pending")
         result.setdefault("graph_updated_at", None)
         result.setdefault("graph_error", None)
+        result.setdefault("embedding_status", "pending")
         result["graph_status"] = result.get("graph_build_status", "pending")
         result["graph_available"] = result.get("graph_build_status") == "complete"
         # Convert column rows to dictionaries and attach as a list under 'columns'

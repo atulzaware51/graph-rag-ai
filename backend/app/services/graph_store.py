@@ -6,10 +6,12 @@ import json
 import logging
 import sqlite3
 from datetime import datetime, timezone
+from threading import Lock
+from time import sleep
 from typing import Any
 
 from sqlalchemy import and_, delete, or_, select
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import OperationalError, SQLAlchemyError
 
 from backend.app.core.database import (
     get_database_engine,
@@ -23,13 +25,44 @@ from backend.app.core.database import (
 
 logger = logging.getLogger(__name__)
 DEFAULT_WORKSPACE_ID = "default"
+SQLITE_WRITE_RETRIES = 3
+SQLITE_RETRY_BASE_SECONDS = 0.05
+_GRAPH_WRITE_LOCKS: dict[tuple[str, str], Lock] = {}
+_GRAPH_WRITE_LOCKS_GUARD = Lock()
 
 
 class GraphPersistenceError(RuntimeError):
     """Raised when a persistent graph operation fails."""
 
 
+def _graph_write_lock(database_key: str, workspace_id: str) -> Lock:
+    """Serialize graph replacement per database and workspace."""
+    key = (database_key, workspace_id)
+    with _GRAPH_WRITE_LOCKS_GUARD:
+        lock = _GRAPH_WRITE_LOCKS.get(key)
+        if lock is None:
+            lock = Lock()
+            _GRAPH_WRITE_LOCKS[key] = lock
+        return lock
+
+
+def _is_sqlite_busy_error(error: OperationalError) -> bool:
+    """Recognize SQLite lock contention so graph writes can be retried safely."""
+    original = error.orig
+    sqlite_error_code = getattr(original, "sqlite_errorcode", None)
+    if isinstance(sqlite_error_code, int):
+        primary_code = sqlite_error_code & 0xFF
+        if primary_code in {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED}:
+            return True
+    message = str(original).casefold()
+    return any(
+        phrase in message
+        for phrase in ("database is locked", "database table is locked", "database is busy")
+    )
+
+
 def _json(value: Any) -> str:
+    """Serialize graph properties consistently for relational persistence."""
     try:
         return json.dumps(
             value,
@@ -44,6 +77,7 @@ def _json(value: Any) -> str:
 
 
 def _string_list(value: Any) -> list[str]:
+    """Keep only non-empty strings when extracting source-column metadata."""
     if not isinstance(value, list):
         return []
     return [item for item in value if isinstance(item, str)]
@@ -101,6 +135,7 @@ def _required_string(
     *,
     maximum_length: int | None = None,
 ) -> str:
+    """Validate graph identifiers and labels before they reach storage."""
     if not isinstance(value, str) or not value.strip():
         raise GraphPersistenceError(f"Graph {field} must be a non-empty string.")
     normalized = value.strip()
@@ -314,72 +349,89 @@ def replace_graph(
         for dataset_id in selected_ids
     ]
 
-    try:
-        initialize_database(database_url)
-        engine = get_database_engine(database_url)
-        with engine.begin() as connection:
-            selected = graph_nodes.c.dataset_id.in_(selected_ids)
-            affected_edges = or_(
-                graph_edges.c.source_dataset_id.in_(selected_ids),
-                graph_edges.c.target_dataset_id.in_(selected_ids),
-            )
-            connection.execute(
-                delete(graph_edges).where(
-                    and_(
-                        graph_edges.c.workspace_id == workspace_id,
-                        affected_edges,
+    engine = get_database_engine(database_url)
+    lock = _graph_write_lock(str(engine.url), workspace_id)
+    with lock:
+        try:
+            initialize_database(database_url)
+            for attempt in range(SQLITE_WRITE_RETRIES):
+                try:
+                    with engine.begin() as connection:
+                        selected = graph_nodes.c.dataset_id.in_(selected_ids)
+                        affected_edges = or_(
+                            graph_edges.c.source_dataset_id.in_(selected_ids),
+                            graph_edges.c.target_dataset_id.in_(selected_ids),
+                        )
+                        connection.execute(
+                            delete(graph_edges).where(
+                                and_(
+                                    graph_edges.c.workspace_id == workspace_id,
+                                    affected_edges,
+                                )
+                            )
+                        )
+                        connection.execute(
+                            delete(graph_evidence).where(
+                                and_(
+                                    graph_evidence.c.workspace_id == workspace_id,
+                                    graph_evidence.c.dataset_id.in_(selected_ids),
+                                )
+                            )
+                        )
+                        connection.execute(
+                            delete(graph_nodes).where(
+                                and_(
+                                    graph_nodes.c.workspace_id == workspace_id,
+                                    selected,
+                                )
+                            )
+                        )
+                        connection.execute(
+                            delete(graph_builds).where(
+                                and_(
+                                    graph_builds.c.workspace_id == workspace_id,
+                                    graph_builds.c.dataset_id.in_(selected_ids),
+                                )
+                            )
+                        )
+                        if prepared_nodes:
+                            connection.execute(graph_nodes.insert(), prepared_nodes)
+                        if prepared_evidence:
+                            connection.execute(
+                                graph_evidence.insert(),
+                                prepared_evidence,
+                            )
+                        if prepared_edges:
+                            connection.execute(graph_edges.insert(), prepared_edges)
+                        connection.execute(graph_builds.insert(), build_rows)
+                    break
+                except OperationalError as exc:
+                    can_retry = (
+                        engine.dialect.name == "sqlite"
+                        and _is_sqlite_busy_error(exc)
+                        and attempt < SQLITE_WRITE_RETRIES - 1
                     )
-                )
-            )
-            connection.execute(
-                delete(graph_evidence).where(
-                    and_(
-                        graph_evidence.c.workspace_id == workspace_id,
-                        graph_evidence.c.dataset_id.in_(selected_ids),
-                    )
-                )
-            )
-            connection.execute(
-                delete(graph_nodes).where(
-                    and_(
-                        graph_nodes.c.workspace_id == workspace_id,
-                        selected,
-                    )
-                )
-            )
-            connection.execute(
-                delete(graph_builds).where(
-                    and_(
-                        graph_builds.c.workspace_id == workspace_id,
-                        graph_builds.c.dataset_id.in_(selected_ids),
-                    )
-                )
-            )
-            if prepared_nodes:
-                connection.execute(graph_nodes.insert(), prepared_nodes)
-            if prepared_evidence:
-                connection.execute(graph_evidence.insert(), prepared_evidence)
-            if prepared_edges:
-                connection.execute(graph_edges.insert(), prepared_edges)
-            connection.execute(graph_builds.insert(), build_rows)
+                    if not can_retry:
+                        raise
+                    sleep(SQLITE_RETRY_BASE_SECONDS * (2**attempt))
             _update_dataset_graph_status(
                 selected_ids,
                 status="complete",
                 database_url=database_url,
             )
-    except GraphPersistenceError:
-        raise
-    except SQLAlchemyError as exc:
-        logger.exception("Persistent graph replacement failed.")
-        _update_dataset_graph_status(
-            selected_ids,
-            status="failed",
-            database_url=database_url,
-            error=str(exc),
-        )
-        raise GraphPersistenceError(
-            "Could not persist the knowledge graph transaction."
-        ) from exc
+        except GraphPersistenceError:
+            raise
+        except SQLAlchemyError as exc:
+            logger.exception("Persistent graph replacement failed.")
+            _update_dataset_graph_status(
+                selected_ids,
+                status="failed",
+                database_url=database_url,
+                error="Graph persistence failed.",
+            )
+            raise GraphPersistenceError(
+                "Could not persist the knowledge graph transaction."
+            ) from exc
 
 
 def get_persisted_graph(
@@ -510,6 +562,21 @@ def delete_dataset_graph(
         "workspace_id",
         maximum_length=80,
     )
+    from backend.app.services import neo4j_store
+
+    if neo4j_store.is_configured():
+        try:
+            neo4j_store.delete_dataset_graph(dataset_id)
+        except neo4j_store.Neo4jStoreError as exc:
+            raise GraphPersistenceError(
+                "Could not remove the dataset's Neo4j knowledge graph."
+            ) from exc
+        _update_dataset_graph_status(
+            [dataset_id],
+            status="pending",
+            database_url=database_url,
+        )
+        return
     try:
         initialize_database(database_url)
         engine = get_database_engine(database_url)

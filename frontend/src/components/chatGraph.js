@@ -1,8 +1,10 @@
+// Convert persisted chat activity into nodes and edges for the chat graph view.
 function graphId(value) {
   return encodeURIComponent(String(value ?? ''))
 }
 
 export function buildChatGraph(chat) {
+  // Project uploads, selected sheets, queried columns, and result tables into a UI graph.
   const nodes = []
   const edges = []
   const uploads = Array.isArray(chat?.uploads) ? chat.uploads : []

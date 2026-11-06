@@ -1,3 +1,5 @@
+"""Persist spreadsheet tables, schemas, searchable chunks, and embeddings."""
+
 # Import json standard library module for handling JSON serialization and deserialization
 import json
 # Import hashlib for stable spreadsheet-content fingerprints.
@@ -20,9 +22,21 @@ import pandas as pd
 import xlrd
 
 from backend.app.core.database import graph_database_url_for_source
+from backend.app.services.embedding_service import (
+    EmbeddingError,
+    embed_texts,
+    embedding_model_name,
+)
 from backend.app.services.graph_store import (
     GraphPersistenceError,
     delete_dataset_graph,
+)
+from backend.app.services.vector_store import (
+    VectorStoreError,
+    create_vector_table,
+    delete_dataset_vectors,
+    get_vector_stats,
+    insert_embeddings,
 )
 
 
@@ -36,6 +50,7 @@ DATASET_STATUS_COLUMNS = {
     "graph_build_status": "pending",
     "graph_updated_at": None,
     "graph_error": None,
+    "embedding_status": "pending",
 }
 
 
@@ -45,16 +60,29 @@ class DatasetStorageError(Exception):
 
 
 # Helper function to read spreadsheet files into a pandas DataFrame based on extension
-def _read_dataframe(file_path: Path, extension: str) -> pd.DataFrame:
+def _read_dataframe(
+    file_path: Path,
+    extension: str,
+    sheet_name: str | None = None,
+) -> pd.DataFrame:
+    """Load one supported file or worksheet into a DataFrame for storage."""
     # Read CSV file using standard pandas read_csv method
     if extension == ".csv":
         return pd.read_csv(file_path)
 
     if extension == ".xls":
-        return pd.read_excel(file_path, engine="xlrd")
+        return pd.read_excel(
+            file_path,
+            sheet_name=sheet_name or 0,
+            engine="xlrd",
+        )
 
     # Read Excel file using pandas read_excel with openpyxl engine
-    return pd.read_excel(file_path, engine="openpyxl")
+    return pd.read_excel(
+        file_path,
+        sheet_name=sheet_name or 0,
+        engine="openpyxl",
+    )
 
 
 # Helper function to sanitize raw spreadsheet column names into valid, unique SQL identifiers
@@ -126,6 +154,7 @@ def _content_fingerprint(dataframe: pd.DataFrame) -> str:
 
 # Helper function to initialize required database tables and indexes if they do not exist
 def _create_metadata_tables(connection: sqlite3.Connection) -> None:
+    """Create or migrate the registry, column, chunk, and vector tables."""
     connection.execute(
         """
         CREATE TABLE IF NOT EXISTS datasets (
@@ -141,7 +170,9 @@ def _create_metadata_tables(connection: sqlite3.Connection) -> None:
             chunk_status TEXT NOT NULL DEFAULT 'complete',
             graph_build_status TEXT NOT NULL DEFAULT 'pending',
             graph_updated_at TEXT,
-            graph_error TEXT
+            graph_error TEXT,
+            sheet_name TEXT,
+            content_fingerprint TEXT
         )
         """
     )
@@ -159,6 +190,11 @@ def _create_metadata_tables(connection: sqlite3.Connection) -> None:
         else:
             connection.execute(
                 f"ALTER TABLE datasets ADD COLUMN {column_name} TEXT NOT NULL DEFAULT '{default_value}'"
+            )
+    for column_name in ("sheet_name", "content_fingerprint"):
+        if column_name not in existing:
+            connection.execute(
+                f"ALTER TABLE datasets ADD COLUMN {column_name} TEXT"
             )
 
     # Create 'dataset_columns' table mapping original column names to generated SQL column names
@@ -204,6 +240,7 @@ def _create_metadata_tables(connection: sqlite3.Connection) -> None:
         ON document_chunks(dataset_id, chunk_index)
         """
     )
+    create_vector_table(connection)
 
 
 # Main function to store dataset table data, metadata, and optional chunks in SQLite
@@ -212,6 +249,7 @@ def store_spreadsheet(
     original_filename: str,
     database_path: str | Path = "data/graphsheet.db",
     chunks: list[dict[str, Any]] | None = None,
+    sheet_name: str | None = None,
 ) -> dict[str, Any]:
     """Store spreadsheet rows, schema metadata, and optional text chunks."""
 
@@ -240,7 +278,7 @@ def store_spreadsheet(
 
     try:
         # Load file contents into pandas DataFrame
-        dataframe = _read_dataframe(path, extension)
+        dataframe = _read_dataframe(path, extension, sheet_name)
     except Exception as exc:
         raise DatasetStorageError(
             f"Could not read spreadsheet: {exc}"
@@ -302,6 +340,7 @@ def store_spreadsheet(
                     "chunk_index": index,
                     "text": chunk_text,
                     "metadata_json": metadata_json,
+                    "metadata": metadata,
                 }
             )
 
@@ -311,19 +350,154 @@ def store_spreadsheet(
     # Generate ISO-8601 UTC timestamp string for creation tracking
     created_at = datetime.now(timezone.utc).isoformat()
 
+    try:
+        with sqlite3.connect(database) as connection:
+            connection.row_factory = sqlite3.Row
+            _create_metadata_tables(connection)
+            existing_fingerprint = connection.execute(
+                """
+                SELECT 1 FROM datasets
+                WHERE content_fingerprint = ?
+                  AND sheet_name IS ?
+                  AND storage_status = 'complete'
+                LIMIT 1
+                """,
+                (content_fingerprint, sheet_name),
+            ).fetchone()
+        vectors = (
+            embed_texts([chunk["text"] for chunk in validated_chunks])
+            if validated_chunks and existing_fingerprint is None
+            else []
+        )
+    except (sqlite3.Error, EmbeddingError) as exc:
+        raise DatasetStorageError(
+            "Could not generate local embeddings for the uploaded spreadsheet."
+        ) from exc
+
     # Initialize connection handle object for explicit exception handling
     connection = None
 
     try:
         # Connect to SQLite database file
         connection = sqlite3.connect(database)
+        connection.row_factory = sqlite3.Row
         # Enable SQLite foreign key constraints enforcing CASCADE actions
         connection.execute("PRAGMA foreign_keys = ON")
         # Ensure metadata schema tables exist
         _create_metadata_tables(connection)
 
         # Begin explicit SQL database transaction
-        connection.execute("BEGIN")
+        connection.execute("BEGIN IMMEDIATE")
+
+        existing = connection.execute(
+            """
+            SELECT dataset_id, original_filename, table_name,
+                   row_count, column_count, sheet_name
+            FROM datasets
+            WHERE content_fingerprint = ?
+              AND sheet_name IS ?
+              AND storage_status = 'complete'
+            ORDER BY created_at ASC
+            LIMIT 1
+            """,
+            (content_fingerprint, sheet_name),
+        ).fetchone()
+        if existing is None:
+            legacy_candidates = connection.execute(
+                """
+                SELECT dataset_id, original_filename, table_name,
+                       row_count, column_count, sheet_name
+                FROM datasets
+                WHERE content_fingerprint IS NULL
+                  AND storage_status = 'complete'
+                  AND row_count = ?
+                  AND column_count = ?
+                  AND sheet_name IS ?
+                """,
+                (len(dataframe), len(sql_columns), sheet_name),
+            ).fetchall()
+            for candidate in legacy_candidates:
+                candidate_id = candidate["dataset_id"]
+                candidate_table = candidate["table_name"]
+                if (
+                    not isinstance(candidate_id, str)
+                    or not re.fullmatch(r"[a-fA-F0-9]{32}", candidate_id)
+                    or candidate_table != f"dataset_{candidate_id}"
+                ):
+                    continue
+                stored_dataframe = pd.read_sql_query(
+                    f'SELECT * FROM "{candidate_table}"',
+                    connection,
+                )
+                candidate_fingerprint = _content_fingerprint(stored_dataframe)
+                connection.execute(
+                    """
+                    UPDATE datasets
+                    SET content_fingerprint = ?
+                    WHERE dataset_id = ? AND content_fingerprint IS NULL
+                    """,
+                    (candidate_fingerprint, candidate_id),
+                )
+                if candidate_fingerprint == content_fingerprint:
+                    existing = connection.execute(
+                        """
+                        SELECT dataset_id, original_filename, table_name,
+                               row_count, column_count, sheet_name
+                        FROM datasets
+                        WHERE dataset_id = ?
+                        """,
+                        (candidate_id,),
+                    ).fetchone()
+                    break
+        if existing is not None:
+            existing_columns = connection.execute(
+                """
+                SELECT original_name, sql_name, data_type, null_count
+                FROM dataset_columns
+                WHERE dataset_id = ?
+                ORDER BY ordinal
+                """,
+                (existing["dataset_id"],),
+            ).fetchall()
+            chunk_count = connection.execute(
+                """
+                SELECT COUNT(*) FROM document_chunks
+                WHERE dataset_id = ?
+                """,
+                (existing["dataset_id"],),
+            ).fetchone()[0]
+            vector_stats = get_vector_stats(existing["dataset_id"], database)
+            connection.commit()
+            return {
+                "dataset_id": existing["dataset_id"],
+                "filename": existing["original_filename"],
+                "table_name": existing["table_name"],
+                "content_fingerprint": content_fingerprint,
+                "sheet_name": existing["sheet_name"],
+                "row_count": existing["row_count"],
+                "column_count": existing["column_count"],
+                "chunk_count": chunk_count,
+                "embedding_status": (
+                    "not_required"
+                    if chunk_count == 0
+                    else (
+                        "complete"
+                        if vector_stats["embedding_count"] >= chunk_count
+                        else "pending"
+                    )
+                ),
+                **vector_stats,
+                "columns": [
+                    {
+                        "original_name": column["original_name"],
+                        "sql_name": column["sql_name"],
+                        "data_type": column["data_type"],
+                        "null_count": column["null_count"],
+                    }
+                    for column in existing_columns
+                ],
+                "duplicate": True,
+            }
 
         # Write dataset DataFrame rows into dedicated SQLite table dynamically
         dataframe.to_sql(
@@ -341,8 +515,9 @@ def store_spreadsheet(
                 row_count, column_count, created_at,
                 upload_status, parsing_status, storage_status,
                 chunk_status, graph_build_status, graph_updated_at,
-                graph_error
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                graph_error, sheet_name, content_fingerprint,
+                embedding_status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 dataset_id,
@@ -358,6 +533,9 @@ def store_spreadsheet(
                 "pending",
                 None,
                 None,
+                sheet_name,
+                content_fingerprint,
+                "complete" if validated_chunks else "not_required",
             ),
         )
 
@@ -401,6 +579,19 @@ def store_spreadsheet(
                 ),
             )
 
+        try:
+            insert_embeddings(
+                connection,
+                dataset_id,
+                validated_chunks,
+                vectors,
+                model_name=embedding_model_name(),
+            )
+        except VectorStoreError as exc:
+            raise DatasetStorageError(
+                "Could not persist local chunk embeddings."
+            ) from exc
+
         # Commit transaction writing all updates atomically to database
         connection.commit()
 
@@ -424,9 +615,17 @@ def store_spreadsheet(
         "filename": Path(original_filename).name,
         "table_name": table_name,
         "content_fingerprint": content_fingerprint,
+        "sheet_name": sheet_name,
+        "duplicate": False,
         "row_count": int(len(dataframe)),
         "column_count": len(sql_columns),
         "chunk_count": len(validated_chunks),
+        "embedding_status": (
+            "complete" if validated_chunks else "not_required"
+        ),
+        "embedding_count": len(vectors),
+        "embedding_dimensions": len(vectors[0]) if vectors else 0,
+        "embedding_model": embedding_model_name() if vectors else None,
         "columns": [
             {
                 "original_name": original,
@@ -516,7 +715,8 @@ def get_dataset_details(
                            row_count, column_count, created_at,
                            upload_status, parsing_status, storage_status,
                            chunk_status, graph_build_status, graph_updated_at,
-                           graph_error
+                           graph_error, sheet_name, content_fingerprint,
+                           embedding_status
                     FROM datasets
                     WHERE dataset_id = ?
                     """,
@@ -543,6 +743,7 @@ def get_dataset_details(
         metadata.setdefault("graph_build_status", "pending")
         metadata.setdefault("graph_updated_at", None)
         metadata.setdefault("graph_error", None)
+        metadata.setdefault("embedding_status", "pending")
         metadata["graph_status"] = metadata.get("graph_build_status", "pending")
         metadata["graph_available"] = metadata.get("graph_build_status") == "complete"
         return metadata
@@ -550,6 +751,78 @@ def get_dataset_details(
     except sqlite3.Error as exc:
         raise DatasetStorageError(
             f"Could not retrieve dataset details: {exc}"
+        ) from exc
+
+
+def update_dataset_embedding_status(
+    dataset_id: str,
+    status: str,
+    database_path: str | Path = "data/graphsheet.db",
+) -> None:
+    """Persist embedding-index state, migrating older dataset schemas as needed."""
+    if not isinstance(dataset_id, str) or not dataset_id.strip():
+        raise ValueError("Dataset ID must be a non-empty string.")
+    if status not in {"pending", "complete", "not_required"}:
+        raise ValueError("Embedding status is invalid.")
+
+    try:
+        with sqlite3.connect(database_path) as connection:
+            _create_metadata_tables(connection)
+            cursor = connection.execute(
+                """
+                UPDATE datasets
+                SET embedding_status = ?
+                WHERE dataset_id = ?
+                """,
+                (status, dataset_id.strip()),
+            )
+            if cursor.rowcount != 1:
+                raise DatasetStorageError(
+                    "Could not update embedding status for the dataset."
+                )
+    except sqlite3.Error as exc:
+        raise DatasetStorageError(
+            "Could not persist the dataset embedding status."
+        ) from exc
+
+
+def update_dataset_graph_status(
+    dataset_ids: list[str],
+    status: str,
+    error: str | None = None,
+    database_path: str | Path = "data/graphsheet.db",
+) -> None:
+    """Persist graph build state when upload-time graph construction fails."""
+    if status not in {"pending", "complete", "failed"}:
+        raise ValueError("Graph status is invalid.")
+    if not isinstance(dataset_ids, list) or any(
+        not isinstance(dataset_id, str) or not dataset_id.strip()
+        for dataset_id in dataset_ids
+    ):
+        raise ValueError("Dataset IDs must be a list of non-empty strings.")
+    try:
+        with sqlite3.connect(database_path) as connection:
+            connection.executemany(
+                """
+                UPDATE datasets
+                SET graph_build_status = ?,
+                    graph_updated_at = ?,
+                    graph_error = ?
+                WHERE dataset_id = ?
+                """,
+                [
+                    (
+                        status,
+                        datetime.now(timezone.utc).isoformat(),
+                        error,
+                        dataset_id,
+                    )
+                    for dataset_id in dataset_ids
+                ],
+            )
+    except sqlite3.Error as exc:
+        raise DatasetStorageError(
+            "Could not persist the knowledge graph build status."
         ) from exc
 
 
@@ -593,10 +866,15 @@ def delete_spreadsheet(
                 dataset_id,
             )
         try:
+            delete_dataset_vectors(dataset_id, database)
             delete_dataset_graph(
                 dataset_id,
                 database_url=graph_database_url_for_source(database),
             )
+        except VectorStoreError as exc:
+            raise DatasetStorageError(
+                "Could not remove the dataset's Chroma vector index."
+            ) from exc
         except GraphPersistenceError as exc:
             raise DatasetStorageError(
                 "Could not remove the dataset's persistent knowledge graph."

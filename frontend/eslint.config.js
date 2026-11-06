@@ -1,3 +1,4 @@
+// Apply JavaScript and React Hooks checks to frontend source files, excluding builds.
 import js from '@eslint/js'
 import globals from 'globals'
 import reactHooks from 'eslint-plugin-react-hooks'

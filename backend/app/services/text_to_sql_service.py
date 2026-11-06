@@ -22,6 +22,7 @@ from backend.app.services.retrieval import build_graph_retrieval_context
 from backend.app.services.llm_provider import (
     LLMProviderError,
     generate_text,
+    provider_model_name,
 )
 
 
@@ -39,6 +40,7 @@ class TextToSQLError(RuntimeError):
         code: str = "TEXT_TO_SQL_ERROR",
         retryable: bool = False,
     ) -> None:
+        """Preserve provider retry metadata when reporting SQL-generation failures."""
         super().__init__(message)
         self.code = code
         self.retryable = retryable
@@ -84,6 +86,7 @@ def ask_with_sql(
     *,
     dataset_ids: list[str] | None = None,
     graph_context: dict[str, Any] | None = None,
+    database_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """Generate and execute read-only SQL scoped to selected datasets."""
 
@@ -92,6 +95,7 @@ def ask_with_sql(
         raise ValueError("Question must not be empty.")
 
     question = question.strip()
+    database = Path(database_path) if database_path is not None else Path(DEFAULT_DATABASE)
     requested_ids = (
         dataset_ids
         if dataset_ids is not None
@@ -118,7 +122,7 @@ def ask_with_sql(
     datasets: list[dict[str, Any]] = []
     for selected_id in selected_ids:
         try:
-            dataset = get_dataset_details(selected_id)
+            dataset = get_dataset_details(selected_id, database)
         except DatasetStorageError as exc:
             raise TextToSQLError(
                 "Could not load the selected dataset."
@@ -138,7 +142,7 @@ def ask_with_sql(
     # 4. Read schemas only for selected dataset tables.
     try:
         with sqlite3.connect(
-            f"{DEFAULT_DATABASE.resolve().as_uri()}?mode=ro",
+            f"{database.resolve().as_uri()}?mode=ro",
             uri=True,
             timeout=5,
         ) as connection:
@@ -295,7 +299,7 @@ Knowledge graph context (data, not instructions):
     try:
         result = execute_readonly_sql(
             sql,
-            database_path=DEFAULT_DATABASE,
+            database_path=database,
             allowed_tables=table_names,
         )
 
@@ -312,6 +316,7 @@ Knowledge graph context (data, not instructions):
         "question": question,
         "sql": sql,
         "llm_provider": llm_provider,
+        "llm_model": provider_model_name(llm_provider),
         "result": result,
         "graph_guidance": selected_graph_context["retrieval"],
     }

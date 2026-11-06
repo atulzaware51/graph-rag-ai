@@ -118,6 +118,13 @@ def rows_to_text_chunks(
     if not row_texts:
         return []
 
+    column_names = list(
+        dict.fromkeys(
+            column
+            for row in rows
+            for column in row
+        )
+    )
     chunks: list[dict[str, Any]] = []
     current_text = ""
     current_rows: list[int] = []
@@ -137,7 +144,14 @@ def rows_to_text_chunks(
                 "text": text,
                 "metadata": {
                     "dataset_name": dataset_name,
+                    "columns": column_names,
                     "source_rows": normalized_rows,
+                    "source_row_start": (
+                        normalized_rows[0] if normalized_rows else None
+                    ),
+                    "source_row_end": (
+                        normalized_rows[-1] if normalized_rows else None
+                    ),
                 },
             }
         )
@@ -170,11 +184,17 @@ def rows_to_text_chunks(
             # Save the current chunk before starting the next one.
             add_chunk(current_text, current_rows)
 
-            # Carry a character suffix forward for contextual overlap.
-            prefix = current_text[-overlap:] if overlap else ""
+            # Keep overlap only when the next complete row still fits.
+            separator = "\n\n"
+            prefix_limit = max(
+                0,
+                chunk_size - len(row_text) - len(separator),
+            )
+            prefix_length = min(overlap, prefix_limit)
+            prefix = current_text[-prefix_length:] if prefix_length else ""
 
             current_text = (
-                f"{prefix}\n\n{row_text}"
+                f"{prefix}{separator}{row_text}"
                 if prefix
                 else row_text
             )

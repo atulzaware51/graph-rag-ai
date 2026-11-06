@@ -46,6 +46,27 @@ def test_aggregate_query(test_database):
     assert result["rows"][0]["revenue"] == 102500
 
 
+def test_count_star_on_selected_dataset_table(test_database):
+    dataset_id = "a" * 32
+    table = f"dataset_{dataset_id}"
+    with sqlite3.connect(test_database) as connection:
+        connection.execute("CREATE TABLE datasets (dataset_id TEXT, table_name TEXT)")
+        connection.execute(f'ALTER TABLE sales RENAME TO "{table}"')
+        connection.execute(
+            "INSERT INTO datasets VALUES (?, ?)",
+            (dataset_id, table),
+        )
+
+    result = execute_readonly_sql(
+        f'SELECT COUNT(*) AS total_records FROM "{table}"',
+        test_database,
+        allowed_table=table,
+    )
+
+    assert result["rows"] == [{"total_records": 2}]
+    assert result["read_column_refs"] == []
+
+
 @pytest.mark.parametrize(
     "query",
     [

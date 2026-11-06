@@ -1,4 +1,5 @@
 
+// Provide the standalone question-and-answer chat panel used by the app UI.
 import { useState } from "react";
 import "./ChatSection.css";
 
@@ -7,12 +8,14 @@ export default function ChatSection({
   onSend,
   messages: initialMessages = [],
 }) {
+  // Keep this panel's message, input, and loading state local to the component.
   const [messages, setMessages] = useState(initialMessages);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   async function handleSubmit(event) {
+    // Add the question immediately, then append either the reply or an error.
     event.preventDefault();
 
     const question = input.trim();

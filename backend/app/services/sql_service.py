@@ -70,6 +70,7 @@ def execute_readonly_sql(
     timed_out = False
 
     def interrupt_if_expired() -> int:
+        """Stop SQLite work once the per-query execution deadline has elapsed."""
         nonlocal timed_out
         if time.monotonic() >= deadline:
             timed_out = True
@@ -118,6 +119,7 @@ def execute_readonly_sql(
             database_name: str | None,
             _trigger_name: str | None,
         ) -> int:
+            """Allow read-only actions and reject access outside selected tables."""
             if action not in allowed_actions:
                 return sqlite3.SQLITE_DENY
 
@@ -134,7 +136,7 @@ def execute_readonly_sql(
                 and scoped_tables
                 and (
                     arg1 not in scoped_tables
-                    or database_name != "main"
+                    or database_name not in {"main", None}
                 )
             ):
                 return sqlite3.SQLITE_DENY
